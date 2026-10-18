@@ -6,14 +6,15 @@ const assert=require('node:assert/strict');
  try {
  const page=await browser.newPage({viewport:{width:1440,height:1000}});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- let detailCalls=0,revision=0;
+ let detailCalls=0,revision=0,submitted=null;
  const student={id:'s1',filename:'示例学生.docx',student_id:'123',candidates:[{id:'c1',problem_id:1,state:'approved',code:Array.from({length:150},(_,i)=>'// source line '+i).join('\n')}]};
  const state={workspace:'demo',summary:{},settings:{},students:[student],jobs:[]};
  await page.route('http://workbench.test/**',async route=>{
   const url=new URL(route.request().url());let data;
   if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync('homework_import/workbench.html','utf8')});
   if(url.pathname==='/api/ui/state')data=state;
-  else if(url.pathname==='/api/ui/job')data={jobs:[]};
+  else if(url.pathname==='/api/ui/job'){if(route.request().method()==='POST'){submitted=route.request().postDataJSON();data={job:{id:'job1',action:submitted.action,status:'queued',progress:[]}}}else data={jobs:[]}}
+  else if(url.pathname==='/api/ui/artifact')data={rows:[{'文件':'示例学生.docx','题意结论':'不符合','逐条要求与证据':'求和：不符合；实际做减法'}]};
   else if(url.pathname==='/api/ui/student'){detailCalls++;data={document:student,assignment:{problems:[{id:1,statement:'求两个整数之和'}]},report:{dir:'demo',result:[],cases:[{'题号':'1','用例':'case1','结果':'答案错误',diff_text:'difference '+revision,expected_text:'2',actual_text:'3'}],compilation:{'1':{status:'编译失败',log:'error: missing semicolon'}}}}}
   else data={};
   await route.fulfill({json:data});
@@ -39,6 +40,18 @@ const assert=require('node:assert/strict');
  await page.getByRole('button',{name:'AI 输出判定',exact:true}).click();
  await page.getByRole('button',{name:'批量判题',exact:true}).first().click();
  assert.equal(await page.locator('#f-out').inputValue(),'my-reports');
+ await page.getByRole('button',{name:'题意符合性判定',exact:true}).click();
+ assert.equal(await page.locator('#f-only').inputValue(),'all');
+ await page.getByRole('button',{name:'开始批量题意判定',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#toast').textContent==='任务已启动');
+ assert.equal(submitted.action,'ai-requirements');
+ assert.equal(submitted.params.only,'all');
+ assert.equal(submitted.params.workspace,'demo');
+ assert.equal(submitted.params.document_id,undefined);
+ assert.equal(submitted.params.candidate_id,undefined);
+ assert.match(await page.locator('#artifact').innerText(),/不符合/);
+ await page.getByRole('button',{name:'学生与判题',exact:true}).first().click();
+ assert.equal(await page.getByRole('button',{name:'检查当前代码是否符合题意',exact:true}).count(),0);
  assert.deepEqual(errors,[]);
  console.log('UI regression checks passed: refresh, expansion, scroll, pause and form drafts');
  }finally{await browser.close()}

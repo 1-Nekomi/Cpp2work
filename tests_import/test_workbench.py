@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from homework_import.workbench import JobManager, student_detail
+from homework_import.workbench import JobManager, student_detail, dispatch
 from homework_import.workspace import write_json
 from homework_import.ai_review import check_candidate
 from homework_import.locking import report_lock
@@ -76,3 +76,27 @@ class WorkbenchRegressionTests(unittest.TestCase):
                 self.assertFalse(entered.wait(.05))
             worker.join(1)
             self.assertTrue(entered.is_set())
+
+
+    def test_batch_requirements_dispatch_only_checks_requirements(self):
+        with patch('homework_import.workbench.provider_from_settings') as provider, patch('homework_import.workbench.run_review') as review:
+            dispatch(Path('.'), 'ai-requirements', {'stage': 'triage'}, print)
+        args, kwargs = review.call_args
+        self.assertEqual(args[2], ('requirements',))
+        self.assertEqual(args[3], 'all')
+        self.assertIsNone(kwargs['document_id'])
+        self.assertIsNone(kwargs['candidate_id'])
+
+    def test_requirements_summary_contains_verdict_and_evidence(self):
+        import csv
+        from homework_import.ai_review import write_review_summary
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_review_summary(root, {'items': {'s/c': {
+                'filename': 'student.docx', 'candidate_id': 'c', 'problem_id': 1,
+                'requirements': {'verdict': 'fail', 'ai_summary': 'wrong algorithm',
+                                 'requirements': [{'text': 'sum', 'status': 'fail', 'ai': {'evidence': 'subtracts'}}]}}}})
+            with (root / 'ai-requirements.csv').open(encoding='utf-8-sig', newline='') as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(rows[0]['题意结论'], '不符合')
+            self.assertIn('subtracts', rows[0]['逐条要求与证据'])

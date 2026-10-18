@@ -426,6 +426,24 @@ def write_review_summary(root: Path, results: dict):
                              _requirement_summary(item), "；".join(triage.get("evidence", [])),
                              item.get("error") or ""])
 
+    labels = {'pass': '符合', 'fail': '不符合', 'unclear': '无法确定'}
+    with (root / 'ai-requirements.csv').open('w', encoding='utf-8-sig', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['文件', '学号', '题号', '候选', '题意结论', '说明', '逐条要求与证据', '错误'])
+        for item in sorted(items.values(), key=lambda x: (x.get('filename', ''), x.get('candidate_id', ''))):
+            requirements = item.get('requirements') or {}
+            if not requirements and not item.get('error'):
+                continue
+            evidence = []
+            for requirement in requirements.get('requirements', []):
+                evidence.append(requirement.get('text', '') + '：' +
+                                labels.get(requirement.get('status'), '无法确定') + '；' +
+                                (requirement.get('ai') or requirement.get('deterministic') or {}).get('evidence', ''))
+            writer.writerow([item.get('filename'), item.get('student_id'), item.get('problem_id'),
+                             item.get('candidate_id'), '调用失败' if item.get('error') else
+                             labels.get(requirements.get('verdict'), '无法确定'),
+                             requirements.get('ai_summary', ''), '\n'.join(evidence), item.get('error') or ''])
+
 
 def _read_limited(path, limit=8000):
     try:

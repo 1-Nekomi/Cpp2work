@@ -90,10 +90,10 @@ def make_server(root: Path, port=0):
                         return self.respond(public_settings(load_settings(root)))
                     if parsed.path == "/api/ui/artifact":
                         name = query.get("name", [""])[0]
-                        if name not in {"ai-review", "ai-output"}:
+                        if name not in {"ai-review", "ai-requirements", "ai-output"}:
                             raise ValueError("未知的结果类型")
                         settings = load_settings(root)
-                        path = (root / "ai-review.csv" if name == "ai-review"
+                        path = (root / (name + ".csv") if name in {"ai-review", "ai-requirements"}
                                 else Path(settings.get("reports", "")) / "ai-output.csv")
                         return self.respond({"name": name, "path": str(path), "rows": read_csv(path)})
                     if parsed.path in {"/api/state", "/api/document", "/asset"} and not has_batch(root):

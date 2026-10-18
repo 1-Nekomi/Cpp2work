@@ -317,7 +317,7 @@ class JobManager:
         with self.lock:
             active = [j for j in self.jobs.values() if j['status'] in {'queued', 'running'}]
             if any(j['action'] == action or action == 'prepare' or j['action'] == 'prepare'
-                   or {j['action'], action} <= {'check', 'export', 'audit', 'ai-review'} for j in active):
+                   or {j['action'], action} <= {'check', 'export', 'audit', 'ai-review', 'ai-requirements'} for j in active):
                 raise ValueError('相同模块或共享工作区的写入任务正在运行，请稍后重试；批量判题与 AI 输出判定可同时运行')
             job['root'] = str(self.root)
             self.jobs[job_id] = job
@@ -396,11 +396,11 @@ def dispatch(root: Path, action: str, params: dict, progress):
         return audit_workspace(workspace)
     if action == "export":
         return export_sources(workspace, Path(params["out"]).resolve())
-    if action == "ai-review":
+    if action in {"ai-review", "ai-requirements"}:
         provider = provider_from_settings(root)
-        stage = params.get("stage", "all")
+        stage = "requirements" if action == "ai-requirements" else params.get("stage", "all")
         stages = ("triage", "requirements") if stage == "all" else (stage,)
-        return run_review(workspace, provider, stages, params.get("only", "needs_review"),
+        return run_review(workspace, provider, stages, params.get("only", "all" if action == "ai-requirements" else "needs_review"),
                           int(params.get("max", 0)), bool(params.get("force")), progress=progress,
                           document_id=params.get('document_id'), candidate_id=params.get('candidate_id'))
     if action == "judge-batch":
