@@ -20,17 +20,63 @@ from .workbench import (JobManager, choose_path, empty_summary, has_batch, load_
                         public_settings, read_csv, save_settings, start_local_ai, stop_local_ai,
                         student_detail, student_overview)
 from .workspace import decide, export_sources, read_json, summary
+from .managed import managed_config, folder_signature, sync_folder, managed_export
 
 
-def make_server(root: Path, port=0):
+def make_server(root: Path, port=0, sync_interval=2):
     root = root.resolve()
     root.mkdir(parents=True, exist_ok=True)
+    launch_root = root
+    remembered = load_settings(root).get('bound_workspace')
+    if (root / 'work' / 'batch.json').is_file():
+        root = root / 'work'
+    elif not managed_config(root) and remembered and (Path(remembered) / 'batch.json').is_file():
+        root = Path(remembered).resolve()
     token = secrets.token_urlsafe(32)
     lock = threading.Lock()
     active = {"root": root}
     workbench = (Path(__file__).parent / "workbench.html").read_text(encoding="utf-8")
     review = (Path(__file__).parent / "review.html").read_text(encoding="utf-8")
     jobs = JobManager(root)
+    stop_watcher = threading.Event()
+    sync_status = {'status': 'idle', 'message': ''}
+
+    def completed(job, result):
+        if job['action'] == 'prepare' and job['params'].get('managed'):
+            with lock:
+                active['root'] = Path(result['workspace'])
+                jobs.root = active['root']
+                save_settings(launch_root, {'bound_workspace': result['workspace']})
+                sync_status.update(status='watching', message='已绑定，正在监测学生报告目录')
+    jobs.on_complete = completed
+
+    def watch():
+        observed = applied = None
+        while not stop_watcher.wait(sync_interval):
+            with lock:
+                try:
+                    current = active['root']
+                    if not managed_config(current):
+                        sync_status.update(status='idle', message='')
+                        observed = applied = None
+                        continue
+                    if jobs.running():
+                        sync_status.update(status='waiting', message='任务运行中；目录变化将在任务结束后同步')
+                        continue
+                    signature = (str(current), folder_signature(current))
+                    if signature != observed:
+                        observed = signature
+                        sync_status.update(status='settling', message='检测到目录变化，等待文件写入稳定')
+                        continue
+                    if signature != applied:
+                        result = sync_folder(current)
+                        applied = signature
+                        sync_status.update(status='watching', message='自动同步已启用：新增 {added}，更新 {updated}，移除 {removed}'.format(**result))
+                    else:
+                        if sync_status['status'] != 'watching':
+                            sync_status.update(status='watching', message='自动同步已启用，正在监测学生报告目录')
+                except (OSError, ValueError, KeyError) as exc:
+                    sync_status.update(status='error', message='同步暂未完成，将自动重试：' + str(exc))
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -68,12 +114,12 @@ def make_server(root: Path, port=0):
                     if parsed.path == "/api/ui/state":
                         settings = load_settings(root)
                         if not has_batch(root):
-                            return self.respond({"workspace": str(root), "summary": empty_summary(),
+                            return self.respond({"sync": dict(sync_status), "workspace": str(root), "summary": empty_summary(),
                                                  "assignment_status": "missing",
                                                  "settings": public_settings(settings),
                                                  "students": [], "jobs": jobs.all(), "job": jobs.last(), "missing": True})
                         state = read_json(root / "batch.json")
-                        return self.respond({"workspace": str(root), "summary": summary(state),
+                        return self.respond({"sync": dict(sync_status), "workspace": str(root), "summary": summary(state),
                                              "assignment_status": read_json(root / "assignment.json").get("status"),
                                              "settings": public_settings(settings),
                                              "students": student_overview(root, settings),
@@ -179,6 +225,10 @@ def make_server(root: Path, port=0):
                             raise ValueError("参数格式错误")
                         if action not in {"prepare", "test-ai"} and not has_batch(root):
                             raise ValueError("当前工作目录还没有导入批次，请先使用“导入”")
+                        if action == 'prepare' and not params.get('out'):
+                            params['managed'] = True
+                        if managed_config(root) and action != 'prepare':
+                            params['workspace'] = str(root)
                         job_id = jobs.start(action, params)
                         return self.respond({"job": jobs.get(job_id)})
                     if parsed.path == "/api/ui/settings":
@@ -187,6 +237,8 @@ def make_server(root: Path, port=0):
                         raise ValueError("当前工作目录还没有导入批次，请先使用“导入”")
                     if parsed.path == "/api/decision":
                         result = decide(root, payload)
+                    elif parsed.path == "/api/export" and managed_config(root):
+                        result = managed_export(root)
                     elif parsed.path == "/api/export":
                         from datetime import datetime
                         folder = root / "exports" / (datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3))
@@ -198,7 +250,15 @@ def make_server(root: Path, port=0):
             except (ValueError, OSError, KeyError, TypeError, AIError, SecretError) as exc:
                 return self.respond({"error": str(exc)}, status=400)
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    class WorkbenchServer(ThreadingHTTPServer):
+        def server_close(self):
+            stop_watcher.set()
+            watcher.join(timeout=5)
+            super().server_close()
+
+    server = WorkbenchServer(("127.0.0.1", port), Handler)
+    watcher = threading.Thread(target=watch, name='report-folder-sync', daemon=True)
+    watcher.start()
     server.daemon_threads = True
     server.review_url = f"http://127.0.0.1:{server.server_port}/review?token={token}"
     server.workbench_url = f"http://127.0.0.1:{server.server_port}/?token={token}"

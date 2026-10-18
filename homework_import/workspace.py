@@ -66,6 +66,25 @@ def verify_provenance(root, document, candidate):
         raise ValueError("源码与原文映射不一致，拒绝继续；请在复核页重新选取原文")
 
 
+def import_submission(file: Path, root: Path, expected: list[int]):
+    ident = "d" + sha(file.name.encode("utf-8"))[:16]
+    item = {"id": ident, "filename": file.name, "path": str(file.resolve())}
+    try:
+        doc = read_document(file, root / "assets" / ident)
+        write_json(root / "documents" / (ident + ".json"), doc)
+        item.update(extract_submission(doc, expected))
+        item["sha256"] = doc["sha256"]
+        item["block_count"] = len(doc["blocks"])
+        for i, candidate in enumerate(item["candidates"], 1):
+            candidate["id"] = f"c{i:03d}"
+            save_candidate_files(root, ident, candidate)
+    except Exception as exc:
+        # A malformed single submission must never terminate the batch.
+        item.update({"student_id": "", "candidates": [], "issues": [str(exc)],
+                     "error": str(exc), "review": None, "sha256": None, "block_count": 0})
+    return item
+
+
 def prepare(teacher: Path, submissions: Path, root: Path):
     root = root.resolve()
     if root.exists() and any(root.iterdir()):
@@ -95,21 +114,7 @@ def prepare(teacher: Path, submissions: Path, root: Path):
         if file.resolve() == teacher.resolve():
             state["ignored_files"].append(file.name)
             continue
-        ident = "d" + sha(file.name.encode("utf-8"))[:16]
-        item = {"id": ident, "filename": file.name, "path": str(file.resolve())}
-        try:
-            doc = read_document(file, root / "assets" / ident)
-            write_json(root / "documents" / (ident + ".json"), doc)
-            item.update(extract_submission(doc, expected))
-            item["sha256"] = doc["sha256"]
-            item["block_count"] = len(doc["blocks"])
-            for i, candidate in enumerate(item["candidates"], 1):
-                candidate["id"] = f"c{i:03d}"
-                save_candidate_files(root, ident, candidate)
-        except Exception as exc:
-            # A malformed single submission must never terminate the batch.
-            item.update({"student_id": "", "candidates": [], "issues": [str(exc)],
-                         "error": str(exc), "review": None, "sha256": None, "block_count": 0})
+        item = import_submission(file, root, expected)
         state["documents"].append(item)
     groups = {}
     for doc in state["documents"]:

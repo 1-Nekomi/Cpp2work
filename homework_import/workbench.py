@@ -75,7 +75,9 @@ def default_settings(root: Path) -> dict:
         "teacher": "",
         "submissions": "",
         "workspace": str(root),
+        "bound_workspace": "",
         "exported": "",
+        "export_generation": -1,
         "reports": str(project / "report" / "imported"),
         "tests": str(project / "tests"),
         "judge": str(judge),
@@ -155,6 +157,15 @@ def load_settings(root: Path) -> dict:
     if not shared_exists and not settings.get('api_key_error') and (
             settings.get('ai_mode') != 'off' or settings.get('api_key_enc')):
         _write_settings(root, settings)
+    from .managed import managed_config
+    managed = managed_config(root)
+    if managed:
+        settings.update({'managed': True, 'workspace': str(root),
+                         'submissions': managed['submissions'], 'output': managed['output'],
+                         'reports': str(Path(managed['output']) / 'reports' / ('batch-' + str(managed['generation'])))})
+        settings['teacher'] = read_json(root / 'documents' / 'teacher.json')['path']
+        if settings.get('export_generation') != managed['generation']:
+            settings['exported'] = ''
     return settings
 
 
@@ -308,6 +319,7 @@ class JobManager:
         self.jobs = {}
         self.lock = threading.Lock()
         self.current = None
+        self.on_complete = None
 
     def start(self, action: str, params: dict):
         job_id = uuid.uuid4().hex[:12]
@@ -342,6 +354,8 @@ class JobManager:
 
         try:
             result = dispatch(Path(job['root']), job["action"], job["params"], progress)
+            if self.on_complete:
+                self.on_complete(job, result)
             with self.lock:
                 job["status"] = "done"
                 job["result"] = result
@@ -384,6 +398,11 @@ def latest_export(workspace: Path) -> Path | None:
 
 def dispatch(root: Path, action: str, params: dict, progress):
     workspace = Path(params.get("workspace") or root).resolve()
+    if action == "prepare" and params.get('managed'):
+        from .managed import bind_folder
+        result = bind_folder(params['submissions'], params.get('teacher'))
+        progress('已绑定学生目录；自动同步已启用：' + result['workspace'])
+        return result
     if action == "prepare":
         target = Path(params["out"])
         result = prepare(Path(params["teacher"]), Path(params["submissions"]), target)
@@ -395,6 +414,9 @@ def dispatch(root: Path, action: str, params: dict, progress):
     if action == "audit":
         return audit_workspace(workspace)
     if action == "export":
+        from .managed import managed_config, managed_export
+        if managed_config(workspace):
+            return managed_export(workspace)
         return export_sources(workspace, Path(params["out"]).resolve())
     if action in {"ai-review", "ai-requirements"}:
         provider = provider_from_settings(root)
@@ -403,6 +425,14 @@ def dispatch(root: Path, action: str, params: dict, progress):
         return run_review(workspace, provider, stages, params.get("only", "all" if action == "ai-requirements" else "needs_review"),
                           int(params.get("max", 0)), bool(params.get("force")), progress=progress,
                           document_id=params.get('document_id'), candidate_id=params.get('candidate_id'))
+    if action in {'judge-batch', 'ai-output'}:
+        settings = load_settings(workspace)
+        if settings.get('managed'):
+            params = {**params, 'reports': settings['reports'], 'out': settings['reports']}
+            if action == 'judge-batch':
+                if not settings.get('exported'):
+                    raise ValueError('学生报告发生变化或尚未导出，请先点击“导出”生成当前批次源码')
+                params['exported'] = settings['exported']
     if action == "judge-batch":
         exported = Path(params["exported"]).resolve()
         if not has_student_code(exported):
