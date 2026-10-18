@@ -290,4 +290,4 @@ cpp-homework-import --version
 
 ## 版本
 
-当前版本 **0.1.4**。变更记录见 [`CHANGELOG.md`](CHANGELOG.md)，项目进度和验证数据见 [`改造工作汇总.md`](改造工作汇总.md)。
+当前版本 **0.1.4**。变更记录见 [`CHANGELOG.md`](CHANGELOG.md)W
