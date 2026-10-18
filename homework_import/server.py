@@ -15,15 +15,15 @@ from urllib.parse import parse_qs, urlsplit
 
 from .ai import AIError
 from .ai_review import attach_ai_to_candidates
-from .workbench import (JobManager, choose_path, load_settings, public_settings, read_csv,
-                        save_settings, start_local_ai, stop_local_ai, student_detail,
-                        student_overview)
+from .workbench import (JobManager, choose_path, empty_summary, has_batch, load_settings,
+                        public_settings, read_csv, save_settings, start_local_ai, stop_local_ai,
+                        student_detail, student_overview)
 from .workspace import decide, export_sources, read_json, summary
 
 
 def make_server(root: Path, port=0):
     root = root.resolve()
-    read_json(root / "batch.json")
+    root.mkdir(parents=True, exist_ok=True)
     token = secrets.token_urlsafe(32)
     lock = threading.Lock()
     workbench = (Path(__file__).parent / "workbench.html").read_text(encoding="utf-8")
@@ -63,14 +63,21 @@ def make_server(root: Path, port=0):
                         page = workbench if parsed.path == "/" else review
                         return self.respond(page.replace("__TOKEN__", token), "text/html; charset=utf-8")
                     if parsed.path == "/api/ui/state":
-                        state = read_json(root / "batch.json")
                         settings = load_settings(root)
+                        if not has_batch(root):
+                            return self.respond({"workspace": str(root), "summary": empty_summary(),
+                                                 "assignment_status": "missing",
+                                                 "settings": public_settings(settings),
+                                                 "students": [], "job": jobs.last(), "missing": True})
+                        state = read_json(root / "batch.json")
                         return self.respond({"workspace": str(root), "summary": summary(state),
                                              "assignment_status": read_json(root / "assignment.json").get("status"),
                                              "settings": public_settings(settings),
                                              "students": student_overview(root, settings),
                                              "job": jobs.last()})
                     if parsed.path == "/api/ui/student":
+                        if not has_batch(root):
+                            raise ValueError("当前工作目录还没有导入批次，请先使用“导入”")
                         ident = query.get("id", [""])[0]
                         return self.respond(student_detail(root, load_settings(root), ident))
                     if parsed.path == "/api/ui/job":
@@ -86,6 +93,8 @@ def make_server(root: Path, port=0):
                         path = (root / "ai-review.csv" if name == "ai-review"
                                 else Path(settings.get("reports", "")) / "ai-output.csv")
                         return self.respond({"name": name, "path": str(path), "rows": read_csv(path)})
+                    if parsed.path in {"/api/state", "/api/document", "/asset"} and not has_batch(root):
+                        raise ValueError("当前工作目录还没有导入批次，请先使用“导入”")
                     if parsed.path == "/api/state":
                         state = read_json(root / "batch.json")
                         docs = []
@@ -153,6 +162,8 @@ def make_server(root: Path, port=0):
                         params = payload.get("params", {})
                         if not isinstance(params, dict):
                             raise ValueError("参数格式错误")
+                        if action not in {"prepare", "test-ai"} and not has_batch(root):
+                            raise ValueError("当前工作目录还没有导入批次，请先使用“导入”")
                         last = jobs.last()
                         if last.get("status") in {"queued", "running"}:
                             raise ValueError("已有任务在运行，请等待完成后再启动")
@@ -160,6 +171,8 @@ def make_server(root: Path, port=0):
                         return self.respond({"job": jobs.get(job_id)})
                     if parsed.path == "/api/ui/settings":
                         return self.respond({"settings": save_settings(root, payload)})
+                    if parsed.path in {"/api/decision", "/api/export"} and not has_batch(root):
+                        raise ValueError("当前工作目录还没有导入批次，请先使用“导入”")
                     if parsed.path == "/api/decision":
                         result = decide(root, payload)
                     elif parsed.path == "/api/export":
@@ -185,6 +198,8 @@ def serve(root, port=0, open_browser=False):
     print("工作台：" + server.workbench_url, flush=True)
     print("人工复核：" + server.review_url, flush=True)
     print("仅本机访问；停止服务请按 Ctrl+C。", flush=True)
+    if not has_batch(Path(root).resolve()):
+        print("提示：当前工作目录还没有导入批次，请在工作台“导入”菜单中导入学生报告。", flush=True)
     if open_browser:
         webbrowser.open(server.workbench_url)
     try:

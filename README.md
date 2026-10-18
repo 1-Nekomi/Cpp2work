@@ -1,4 +1,4 @@
-# C++ 作业自动判题器 0.1.2
+# C++ 作业自动判题器 0.1.3
 
 面向 C++ 实验报告的批量判题工具：从 Word 报告提取学生源码，保留原文来源，交给教师复核，再导出给现有 C++ 判题器执行测试。
 
@@ -34,7 +34,7 @@ Python 代码不依赖第三方库；`pyproject.toml` 只用于打包和 console
 start-workbench.cmd
 ```
 
-它默认打开 `imports\validation-final` 工作台。也可以手动启动：
+它优先打开 `imports\validation-final`；该目录没有批次时，自动选择 `imports\*` 下最新的已有批次；都没有则打开空工作台，先在“导入”菜单导入即可。也可以手动启动：
 
 ```powershell
 .\import.ps1 review --workspace imports\validation-final --open
@@ -125,7 +125,7 @@ API 密钥保存在当前工作目录的 `ui-settings.json`，页面只显示“
 ├─ import_homework.py          兼容入口，实际调用 homework_import.cli
 ├─ import.ps1                  启动 Python 命令行
 ├─ run.ps1 / run.sh            构建并运行 C++ 判题器
-├─ start-workbench.cmd         双击启动图形工作台
+├─ start-workbench.cmd / .ps1  双击启动图形工作台并自动选择已有批次
 ├─ start-review.cmd            兼容快捷方式（同样打开工作台）
 ├─ pyproject.toml              Python 包元数据和 console script
 ├─ CHANGELOG.md                版本记录
@@ -278,7 +278,7 @@ tests/p1/case2.exp
 python -m unittest discover -s tests_import -q
 ```
 
-当前 49 项测试全部通过，覆盖 DOCX 解析、来源映射、复核门槛、导出限制、配置/原件变化、AI 结构化输出和缓存、工作台页面/状态/任务接口，以及原复核页面。
+当前 50 项测试全部通过，覆盖 DOCX 解析、来源映射、复核门槛、导出限制、配置/原件变化、AI 结构化输出和缓存、工作台页面/状态/任务接口，以及原复核页面。
 
 可选安装为 Python 包：
 
@@ -289,4 +289,4 @@ cpp-homework-import --version
 
 ## 版本
 
-当前版本 **0.1.2**。变更记录见 [`CHANGELOG.md`](CHANGELOG.md)，项目进度和验证数据见 [`改造工作汇总.md`](改造工作汇总.md)。
+当前版本 **0.1.3**。变更记录见 [`CHANGELOG.md`](CHANGELOG.md)，项目进度和验证数据见 [`改造工作汇总.md`](改造工作汇总.md)。

@@ -267,6 +267,23 @@ class ImportTests(unittest.TestCase):
         finally:
             server.shutdown();server.server_close();thread.join()
 
+    def test_workbench_starts_without_import_batch(self):
+        root=self.root/'empty-workspace';root.mkdir()
+        server=make_server(root);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            token=server.workbench_url.split('token=',1)[1]
+            base=f'http://127.0.0.1:{server.server_port}'
+            with urllib.request.urlopen(base+'/api/ui/state?token='+token) as response:
+                state=json.loads(response.read().decode('utf-8'))
+            self.assertTrue(state['missing'])
+            self.assertEqual(state['summary']['documents'],0)
+            self.assertEqual(state['students'],[])
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(base+'/api/ui/student?id=x&token='+token)
+            self.assertEqual(ctx.exception.code,400)
+        finally:
+            server.shutdown();server.server_close();thread.join()
+
     def test_batch_judge_rejects_empty_export_directory(self):
         exported=self.root/'empty';exported.mkdir()
         tests=self.root/'tests';tests.mkdir()

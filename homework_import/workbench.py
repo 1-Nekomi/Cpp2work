@@ -36,6 +36,17 @@ def settings_path(root: Path) -> Path:
     return root / SETTINGS_FILE
 
 
+def has_batch(root: Path) -> bool:
+    return (root / "batch.json").is_file()
+
+
+def empty_summary() -> dict:
+    return {"documents": 0, "readable": 0, "file_errors": 0, "candidates": 0,
+            "auto_ready": 0, "needs_review": 0, "approved": 0, "rejected": 0,
+            "document_reviews": 0, "compile_ok": 0, "compile_failed": 0,
+            "ignored_files": 0}
+
+
 def default_settings(root: Path) -> dict:
     project = Path.cwd()
     return {
@@ -273,7 +284,10 @@ def latest_export(workspace: Path) -> Path | None:
 def dispatch(root: Path, action: str, params: dict, progress):
     workspace = Path(params.get("workspace") or root).resolve()
     if action == "prepare":
-        return prepare(Path(params["teacher"]), Path(params["submissions"]), Path(params["out"]))
+        target = Path(params["out"])
+        result = prepare(Path(params["teacher"]), Path(params["submissions"]), target)
+        progress("导入完成。若输出目录不是当前工作目录，请用该目录重启工作台：--workspace " + str(target))
+        return result
     if action == "check":
         return compile_check(workspace, params.get("compiler", "g++"),
                              int(params.get("jobs", 4)), progress=progress)
