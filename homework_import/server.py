@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .ai import AIError
 from .ai_review import attach_ai_to_candidates
+from .secrets import SecretError
 from .workbench import (JobManager, choose_path, empty_summary, has_batch, load_settings,
                         public_settings, read_csv, save_settings, start_local_ai, stop_local_ai,
                         student_detail, student_overview)
@@ -183,7 +184,7 @@ def make_server(root: Path, port=0):
                     else:
                         return self.respond({"error": "不存在的操作"}, status=404)
                 return self.respond(result)
-            except (ValueError, OSError, KeyError, TypeError, AIError) as exc:
+            except (ValueError, OSError, KeyError, TypeError, AIError, SecretError) as exc:
                 return self.respond({"error": str(exc)}, status=400)
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)

@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 import tempfile
 import threading
 import types
@@ -14,7 +15,8 @@ from homework_import.ai import AIConfig, AIProvider
 from homework_import.ai_review import (attach_ai_to_candidates, deterministic_checks, load_results,
                                        run_output_review, run_review)
 from homework_import.server import make_server
-from homework_import.workbench import student_detail
+from homework_import.workbench import (load_settings, public_settings, save_settings,
+                                       settings_path, student_detail)
 from homework_import.workspace import prepare, read_json, write_json
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -161,6 +163,35 @@ class AITests(unittest.TestCase):
         case = next(c for c in detail["report"]["cases"] if c["题号"] == "1" and c["用例"] == "case1")
         self.assertEqual(case["ai_output"]["verdict"], "format_only")
         self.assertEqual(case["ai_output"]["suggested_accept"], True)
+
+    @unittest.skipUnless(os.name == "nt", "Windows DPAPI test")
+    def test_api_key_is_encrypted_at_rest_and_roundtrips(self):
+        root = self.root / "workspace"
+        root.mkdir()
+        save_settings(root, {"api_key": "secret-value-123"})
+        stored = settings_path(root).read_text(encoding="utf-8")
+        self.assertNotIn("secret-value-123", stored)
+        payload = json.loads(stored)
+        self.assertNotIn("api_key", payload)
+        self.assertTrue(payload["api_key_enc"].startswith("dpapi:"))
+        self.assertEqual(load_settings(root)["api_key"], "secret-value-123")
+        public = public_settings(load_settings(root))
+        self.assertTrue(public["api_key_set"])
+        self.assertNotIn("api_key_enc", public)
+        self.assertEqual(public["api_key"], "")
+
+    @unittest.skipUnless(os.name == "nt", "Windows DPAPI test")
+    def test_legacy_plaintext_key_is_migrated(self):
+        root = self.root / "workspace"
+        root.mkdir()
+        write_json(settings_path(root), {"api_key": "legacy-secret"})
+        settings = load_settings(root)
+        self.assertEqual(settings["api_key"], "legacy-secret")
+        stored = settings_path(root).read_text(encoding="utf-8")
+        self.assertNotIn("legacy-secret", stored)
+        payload = json.loads(stored)
+        self.assertNotIn("api_key", payload)
+        self.assertTrue(payload["api_key_enc"].startswith("dpapi:"))
 
     def test_provider_cache_reuses_response(self):
         cache = self.root / "cache"

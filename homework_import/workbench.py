@@ -20,6 +20,7 @@ from pathlib import Path
 from .ai import AIConfig, AIError, AIProvider
 from .ai_review import attach_ai_to_candidates, run_output_review, run_review
 from .judge_batch import run_batch
+from .secrets import SecretError, protect, unprotect
 from .workspace import (audit_workspace, compile_check, export_sources, prepare,
                         read_json, write_json)
 
@@ -62,11 +63,21 @@ def default_settings(root: Path) -> dict:
         "ai_base_url": "https://api.openai.com/v1",
         "ai_model": "gpt-4o-mini",
         "api_key": "",
+        "api_key_enc": "",
         "ai_timeout": 90,
         "local_model_path": "",
         "local_server_path": "",
         "local_port": 8080,
     }
+
+
+def _persistable(settings: dict) -> dict:
+    """Never write the plaintext key; only its DPAPI ciphertext is persisted."""
+    return {k: v for k, v in settings.items() if k not in {"api_key", "api_key_error"}}
+
+
+def _write_settings(root: Path, settings: dict):
+    write_json(settings_path(root), _persistable(settings))
 
 
 def load_settings(root: Path) -> dict:
@@ -79,29 +90,57 @@ def load_settings(root: Path) -> dict:
                 settings.update(stored)
         except (OSError, ValueError):
             pass
+    encrypted = str(settings.get("api_key_enc", "") or "")
+    plaintext = str(settings.get("api_key", "") or "")
+    settings["api_key"] = ""
+    settings["api_key_enc"] = encrypted
+    if encrypted:
+        try:
+            settings["api_key"] = unprotect(encrypted)
+        except SecretError as exc:
+            settings["api_key_error"] = str(exc)
+    elif plaintext:
+        # Migrate keys written by older versions. If DPAPI is unavailable,
+        # keep the plaintext only in memory and tell the user to use an env var.
+        try:
+            settings["api_key_enc"] = protect(plaintext)
+            settings["api_key"] = plaintext
+            _write_settings(root, settings)
+        except SecretError as exc:
+            settings["api_key"] = plaintext
+            settings["api_key_error"] = str(exc)
     return settings
 
 
 def public_settings(settings: dict) -> dict:
-    public = {k: v for k, v in settings.items() if k != "api_key"}
-    public["api_key_set"] = bool(settings.get("api_key"))
+    public = {k: v for k, v in settings.items() if k not in {"api_key", "api_key_enc"}}
+    public["api_key_set"] = bool(settings.get("api_key") or settings.get("api_key_enc"))
     public["api_key"] = ""
     return public
 
 
 def save_settings(root: Path, payload: dict) -> dict:
     current = load_settings(root)
-    allowed = set(current)
+    allowed = set(current) - {"api_key", "api_key_enc", "api_key_error"}
     for key, value in payload.items():
         if key in allowed:
             current[key] = value
     if payload.get("clear_api_key"):
         current["api_key"] = ""
+        current["api_key_enc"] = ""
+        current["api_key_error"] = ""
     elif payload.get("api_key") and payload.get("api_key") != "***":
-        current["api_key"] = str(payload["api_key"])
+        secret = str(payload["api_key"])
+        try:
+            current["api_key_enc"] = protect(secret)
+            current["api_key"] = secret
+            current["api_key_error"] = ""
+        except SecretError as exc:
+            raise SecretError("无法加密保存 API 密钥：" + str(exc) +
+                              "。非 Windows 环境请使用 AI_API_KEY 环境变量。") from exc
     if not current.get("workspace"):
         current["workspace"] = str(root)
-    write_json(settings_path(root), current)
+    _write_settings(root, current)
     return public_settings(current)
 
 
@@ -118,7 +157,8 @@ def provider_from_settings(root: Path, settings: dict | None = None) -> AIProvid
         timeout = float(settings.get("ai_timeout", 90))
     except (TypeError, ValueError):
         timeout = 90.0
-    config = AIConfig(base.rstrip("/"), model, str(settings.get("api_key", "")), timeout)
+    key = str(settings.get("api_key") or os.environ.get("AI_API_KEY", ""))
+    config = AIConfig(base.rstrip("/"), model, key, timeout)
     return AIProvider(config, root / "ai" / "cache")
 
 
@@ -194,7 +234,7 @@ def start_local_ai(root: Path, settings: dict) -> dict:
     settings["ai_mode"] = "local"
     settings["ai_base_url"] = f"http://127.0.0.1:{port}/v1"
     settings["ai_model"] = "local"
-    write_json(settings_path(root), settings)
+    _write_settings(root, settings)
     return {"running": True, "port": port, "base_url": settings["ai_base_url"],
             "model": "local", "log": str(log_path)}
 

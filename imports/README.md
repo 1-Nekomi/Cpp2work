@@ -21,6 +21,6 @@
 | `review-events.jsonl` | 人工复核操作记录（首次复核后生成）。 |
 | `ai-results.json`、`ai-review.md/csv` | 可选的 AI 分诊/要求检查建议（不自动改变复核状态）。 |
 | `ai/cache/` | AI 响应缓存，按源码和提示词哈希保存。 |
-| `ui-settings.json` | 工作台保存的路径和 AI 配置；可能包含 API 密钥，请勿分享此目录。 |
+| `ui-settings.json` | 工作台保存的路径和 AI 配置；API 密钥使用 Windows DPAPI 加密保存。 |
 
 使用方式见项目根目录 `README.md` 的“图形界面工作台（推荐）”或“命令行导入与复核（高级）”一节。

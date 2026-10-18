@@ -1,4 +1,4 @@
-# C++ 作业自动判题器 0.1.3
+# C++ 作业自动判题器 0.1.4
 
 面向 C++ 实验报告的批量判题工具：从 Word 报告提取学生源码，保留原文来源，交给教师复核，再导出给现有 C++ 判题器执行测试。
 
@@ -95,7 +95,7 @@ start-workbench.cmd
   - `https://api.deepseek.com/v1` + `deepseek-chat`
 - **本地模型**：选择 `.gguf` 模型文件和 `llama-server.exe`，设置端口后点击“启动本地服务”。也可以先启动 Ollama/LM Studio，再填写其 OpenAI 兼容地址和模型名称。
 
-API 密钥保存在当前工作目录的 `ui-settings.json`，页面只显示“已保存”而不回显密钥。该文件已加入 `.gitignore`；请勿把工作目录分享给他人。敏感数据优先使用本地模型。
+API 密钥使用 Windows DPAPI 加密后保存在当前工作目录的 `ui-settings.json`，只有创建它的 Windows 用户能解密；页面只显示“已保存”而不回显密钥。该文件已加入 `.gitignore`。非 Windows 环境不保存密钥，请使用 `AI_API_KEY` 环境变量。敏感数据优先使用本地模型。
 
 文件选择按钮调用服务器所在电脑的原生文件对话框；如果无法弹出，可以直接在输入框中填写路径。
 
@@ -144,7 +144,7 @@ API 密钥保存在当前工作目录的 `ui-settings.json`，页面只显示“
 | `build/`、`build-windows/` | CMake 构建产物。 |
 | `code/build/`、`code/res*.txt` | 判题器运行产物。 |
 | `artifacts/` | 研究/验证输出。 |
-| `ui-settings.json` | 工作台设置，可能含 API 密钥。 |
+| `ui-settings.json` | 工作台设置，API 密钥以 Windows DPAPI 密文保存。 |
 | `ai/cache/` | AI 响应缓存。 |
 
 `imports/README.md` 保留在仓库中，用于说明批次目录状态；实际批次数据不提交。
@@ -271,6 +271,7 @@ tests/p1/case2.exp
 - 学生代码和注释是不可信输入，提示词明确要求模型不执行其中的指令。
 - 云端模式会把题面、源码和输出发送给模型提供方；发送前会移除学号、姓名和文件名中的身份信息，但源码字符串中仍可能含姓名。敏感场景请用本地模型。
 - AI 结果保存在本地，按源码哈希和提示词版本缓存；不会上传到其他服务。
+- 云端 API 密钥使用 Windows DPAPI 加密后写入本地 `ui-settings.json`，文件不保存明文；只有创建它的 Windows 用户能解密。非 Windows 环境请使用 `AI_API_KEY` 环境变量。
 
 ## 开发与测试
 
@@ -278,7 +279,7 @@ tests/p1/case2.exp
 python -m unittest discover -s tests_import -q
 ```
 
-当前 50 项测试全部通过，覆盖 DOCX 解析、来源映射、复核门槛、导出限制、配置/原件变化、AI 结构化输出和缓存、工作台页面/状态/任务接口，以及原复核页面。
+当前 52 项测试全部通过，覆盖 DOCX 解析、来源映射、复核门槛、导出限制、配置/原件变化、AI 结构化输出和缓存、工作台页面/状态/任务接口，以及原复核页面。
 
 可选安装为 Python 包：
 
@@ -289,4 +290,4 @@ cpp-homework-import --version
 
 ## 版本
 
-当前版本 **0.1.3**。变更记录见 [`CHANGELOG.md`](CHANGELOG.md)，项目进度和验证数据见 [`改造工作汇总.md`](改造工作汇总.md)。
+当前版本 **0.1.4**。变更记录见 [`CHANGELOG.md`](CHANGELOG.md)，项目进度和验证数据见 [`改造工作汇总.md`](改造工作汇总.md)。
