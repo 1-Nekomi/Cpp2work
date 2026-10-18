@@ -14,7 +14,7 @@ from pathlib import Path
 from .ai import AIError
 from .documents import sha
 from .extraction import mask_cpp
-from .locking import workspace_lock
+from .locking import workspace_lock, report_lock
 from .workspace import read_json, write_json
 
 SYSTEM = (
@@ -24,7 +24,7 @@ SYSTEM = (
 )
 
 TRIAGE_VERSION = "triage-v1"
-REQUIREMENTS_VERSION = "requirements-v1"
+REQUIREMENTS_VERSION = "requirements-v2"
 OUTPUT_VERSION = "output-v1"
 
 TRIAGE_PROMPT = """判断下面这段提取结果的问题更可能来自“提取范围/解析”还是“学生源码本身”。
@@ -270,6 +270,11 @@ def triage_candidate(provider, root: Path, doc: dict, candidate: dict, problem: 
 
 
 def check_candidate(provider, root: Path, doc: dict, candidate: dict, problem: dict) -> dict:
+    problem = dict(problem)
+    problem['requirements'] = list(problem.get('requirements', []))
+    if problem.get('statement', '').strip():
+        problem['requirements'].append({'text': '整体题意：' + problem['statement'] +
+                                       '\n教师补充：' + problem.get('teacher_notes', '')})
     context = _candidate_context(root, doc, candidate, problem)
     deterministic = deterministic_checks(problem, candidate.get("code", ""))
     requirements = context["problem"]["requirements"]
@@ -287,14 +292,17 @@ def check_candidate(provider, root: Path, doc: dict, candidate: dict, problem: d
     for item in deterministic["requirements"]:
         index = item["index"]
         ai_item = ai_part["requirements"][index] if index < len(ai_part["requirements"]) else None
-        status = item["deterministic"]["status"] if item["deterministic"] and item["deterministic"]["status"] != "unclear" else (ai_item or {}).get("status", "unclear")
+        status = (ai_item or {}).get("status", "unclear")
         merged.append({"index": index, "text": item["text"], "status": status,
                        "deterministic": item["deterministic"], "ai": ai_item})
-    return {"deterministic": deterministic["checks"], "requirements": merged, "ai_summary": ai_part["summary"]}
+    statuses = [r['status'] for r in merged]
+    verdict = 'fail' if 'fail' in statuses else ('pass' if statuses and all(v == 'pass' for v in statuses) else 'unclear')
+    return {"deterministic": deterministic["checks"], "requirements": merged,
+            "verdict": verdict, "ai_summary": ai_part["summary"]}
 
 
 def run_review(root: Path, provider, stages=("triage", "requirements"), only="needs_review",
-               max_items=0, force=False, progress=print) -> dict:
+               max_items=0, force=False, progress=print, document_id=None, candidate_id=None) -> dict:
     stage_set = set(stages)
     state = read_json(root / "batch.json")
     assignment = read_json(root / "assignment.json")
@@ -302,9 +310,13 @@ def run_review(root: Path, provider, stages=("triage", "requirements"), only="ne
     results = load_results(root)
     tasks = []
     for doc in state["documents"]:
+        if document_id and doc["id"] != document_id:
+            continue
         if doc.get("error"):
             continue
         for candidate in doc.get("candidates", []):
+            if candidate_id and candidate["id"] != candidate_id:
+                continue
             if candidate.get("state") == "rejected":
                 continue
             if only == "needs_review" and candidate.get("state") != "needs_review":
@@ -320,6 +332,9 @@ def run_review(root: Path, provider, stages=("triage", "requirements"), only="ne
         key = _key(doc["id"], candidate["id"])
         code_hash = sha(candidate["code"].encode("utf-8"))
         existing = results["items"].get(key)
+        requirement_key = sha((REQUIREMENTS_VERSION + json.dumps(problem, ensure_ascii=False, sort_keys=True)).encode('utf-8'))
+        if existing and existing.get('requirement_key') != requirement_key:
+            existing = None
         if not force and existing and existing.get("code_sha256") == code_hash and stage_set <= set(existing.get("stages", [])):
             skipped += 1
             continue
@@ -329,6 +344,7 @@ def run_review(root: Path, provider, stages=("triage", "requirements"), only="ne
             "code_sha256": code_hash, "stages": [], "triage": None, "requirements": None,
             "model": None, "created_at": _now(), "error": None,
         }
+        item["requirement_key"] = requirement_key
         item["model"] = provider.config.model if getattr(provider, "config", None) else item.get("model")
         try:
             if "triage" in stage_set:
@@ -423,78 +439,83 @@ def run_output_review(workspace: Path, reports: Path, tests: Path, provider,
                       only="答案错误", max_cases=0, force=False, progress=print) -> dict:
     assignment = read_json(workspace / "assignment.json")
     problems = {p["id"]: p for p in assignment.get("problems", [])}
+    reports.mkdir(parents=True, exist_ok=True)
     summary_path = reports / "ai-output.csv"
     done = skipped = failed = 0
     rows = []
     for student_dir in sorted([p for p in reports.iterdir() if p.is_dir()], key=lambda p: p.name):
-        cases_csv = student_dir / "cases.csv"
-        if not cases_csv.is_file():
-            continue
-        output_file = student_dir / "ai-output.json"
-        existing = read_json(output_file) if output_file.is_file() else {"items": {}}
-        if not isinstance(existing.get("items"), dict):
-            existing["items"] = {}
-        identity = []
-        result_csv = student_dir / "result.csv"
-        if result_csv.is_file():
-            with result_csv.open(encoding="utf-8-sig", newline="") as f:
-                for row in csv.DictReader(f):
-                    if row.get("学号") or row.get("姓名"):
-                        identity = [row.get("学号", ""), row.get("姓名", "")]
-                        break
-        with cases_csv.open(encoding="utf-8-sig", newline="") as f:
-            records = list(csv.DictReader(f))
-        for record in records:
-            if only and record.get("结果") != only:
+        with report_lock(student_dir):
+            cases_csv = student_dir / "cases.csv"
+            if not cases_csv.is_file():
                 continue
-            try:
-                problem_id = int(record.get("题号", "0"))
-            except ValueError:
-                continue
-            problem = problems.get(problem_id)
-            if problem is None:
-                continue
-            case_name = record.get("用例", "")
-            key = f"p{problem_id}/{case_name}"
-            expected = _redact(_read_limited(record.get("预期文件", "")), identity)
-            actual = _strip_identity_line(_redact(_read_limited(record.get("实际输出", "")), identity))
-            input_text = _redact(_read_limited(record.get("输入文件", "")), identity)
-            diff = _redact(_read_limited(record.get("差异说明", "") or "", 4000), identity)
-            cache_key = sha((expected + "\x00" + actual + "\x00" + str(problem.get("format_policy"))).encode("utf-8"))
-            current = existing["items"].get(key)
-            if not force and current and current.get("content_sha256") == cache_key:
-                skipped += 1
-                continue
-            user = ("请按要求输出JSON。\n\n题目：\n" +
-                    json.dumps({"id": problem.get("id"), "statement": problem.get("statement", "")[:6000],
-                                "format_policy": problem.get("format_policy"),
-                                "teacher_notes": problem.get("teacher_notes", "")[:2000]},
-                               ensure_ascii=False, indent=2) +
-                    f"\n\n用例：{case_name}\n输入：\n{input_text}\n预期输出：\n{expected}\n实际输出：\n{actual}\n差异说明：\n{diff}")
-            try:
-                verdict = validate_output(provider.chat_json(SYSTEM + "\n\n" + OUTPUT_PROMPT, user))
-            except AIError as exc:
-                failed += 1
-                progress(f"AI输出判定失败 {student_dir.name}/{key}：{exc}", flush=True)
-                continue
-            suggested = verdict["verdict"] in {"equivalent", "format_only"} and verdict["confidence"] >= 0.75
-            recommendation = {"equivalent": "可按等价输出通过", "format_only": "可按格式差异通过",
-                              "different_answer": "结果不同，保持未通过",
-                              "unclear": "仍需人工复核"}[verdict["verdict"]]
-            existing["items"][key] = {"student": student_dir.name, "problem_id": problem_id,
-                                      "case": case_name, "content_sha256": cache_key,
-                                      "model": provider.config.model if getattr(provider, "config", None) else "",
-                                      "updated_at": _now(), "suggested_accept": suggested,
-                                      "recommendation": recommendation, **verdict}
-            output_file.write_text(json.dumps(existing, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            rows.append([student_dir.name, problem_id, case_name, verdict.get("verdict"),
-                         verdict.get("confidence"), "是" if suggested else "否", recommendation,
-                         "；".join(verdict.get("evidence", []))])
-            done += 1
+            output_file = student_dir / "ai-output.json"
+            existing = read_json(output_file) if output_file.is_file() else {"items": {}}
+            if not isinstance(existing.get("items"), dict):
+                existing["items"] = {}
+            identity = []
+            result_csv = student_dir / "result.csv"
+            if result_csv.is_file():
+                with result_csv.open(encoding="utf-8-sig", newline="") as f:
+                    for row in csv.DictReader(f):
+                        if row.get("学号") or row.get("姓名"):
+                            identity = [row.get("学号", ""), row.get("姓名", "")]
+                            break
+            with cases_csv.open(encoding="utf-8-sig", newline="") as f:
+                records = list(csv.DictReader(f))
+            for record in records:
+                if only and record.get("结果") != only:
+                    continue
+                try:
+                    problem_id = int(record.get("题号", "0"))
+                except ValueError:
+                    continue
+                problem = problems.get(problem_id)
+                if problem is None:
+                    continue
+                case_name = record.get("用例", "")
+                key = f"p{problem_id}/{case_name}"
+                expected = _redact(_read_limited(record.get("预期文件", "")), identity)
+                actual = _strip_identity_line(_redact(_read_limited(record.get("实际输出", "")), identity))
+                input_text = _redact(_read_limited(record.get("输入文件", "")), identity)
+                diff = _redact(_read_limited(record.get("差异说明", "") or "", 4000), identity)
+                cache_key = sha((expected + "\x00" + actual + "\x00" + str(problem.get("format_policy"))).encode("utf-8"))
+                current = existing["items"].get(key)
+                if not force and current and current.get("content_sha256") == cache_key:
+                    skipped += 1
+                    rows.append([student_dir.name, problem_id, case_name, current.get('verdict'),
+                                 current.get('confidence'), '是' if current.get('suggested_accept') else '否',
+                                 current.get('recommendation', ''), '；'.join(current.get('evidence', []))])
+                    continue
+                user = ("请按要求输出JSON。\n\n题目：\n" +
+                        json.dumps({"id": problem.get("id"), "statement": problem.get("statement", "")[:6000],
+                                    "format_policy": problem.get("format_policy"),
+                                    "teacher_notes": problem.get("teacher_notes", "")[:2000]},
+                                   ensure_ascii=False, indent=2) +
+                        f"\n\n用例：{case_name}\n输入：\n{input_text}\n预期输出：\n{expected}\n实际输出：\n{actual}\n差异说明：\n{diff}")
+                try:
+                    verdict = validate_output(provider.chat_json(SYSTEM + "\n\n" + OUTPUT_PROMPT, user))
+                except AIError as exc:
+                    failed += 1
+                    progress(f"AI输出判定失败 {student_dir.name}/{key}：{exc}", flush=True)
+                    continue
+                suggested = verdict["verdict"] in {"equivalent", "format_only"} and verdict["confidence"] >= 0.75
+                recommendation = {"equivalent": "可按等价输出通过", "format_only": "可按格式差异通过",
+                                  "different_answer": "结果不同，保持未通过",
+                                  "unclear": "仍需人工复核"}[verdict["verdict"]]
+                existing["items"][key] = {"student": student_dir.name, "problem_id": problem_id,
+                                          "case": case_name, "content_sha256": cache_key,
+                                          "model": provider.config.model if getattr(provider, "config", None) else "",
+                                          "updated_at": _now(), "suggested_accept": suggested,
+                                          "recommendation": recommendation, **verdict}
+                write_json(output_file, existing)
+                rows.append([student_dir.name, problem_id, case_name, verdict.get("verdict"),
+                             verdict.get("confidence"), "是" if suggested else "否", recommendation,
+                             "；".join(verdict.get("evidence", []))])
+                done += 1
+                if max_cases and done >= max_cases:
+                    break
             if max_cases and done >= max_cases:
                 break
-        if max_cases and done >= max_cases:
-            break
     with summary_path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["学生目录", "题号", "用例", "AI判定", "置信度", "建议接受", "建议", "证据"])

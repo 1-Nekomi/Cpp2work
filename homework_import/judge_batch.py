@@ -1,6 +1,8 @@
 """Run the existing C++ judge over an exported batch and aggregate class results."""
 from __future__ import annotations
 
+from .locking import report_lock
+
 import csv
 import json
 import shutil
@@ -87,33 +89,36 @@ def run_batch(exported: Path, tests: Path, out: Path, judge: str,
     skipped = 0
     for i, student in enumerate(students, 1):
         target = out / student.name
-        target.mkdir(parents=True, exist_ok=True)
-        if not force and (target / "summary.md").is_file() and (target / "result.csv").is_file():
-            summary = _student_summary(student, target, None)
-            summary["skipped"] = True
+        with report_lock(target):
+            target.mkdir(parents=True, exist_ok=True)
+            if not force and (target / "summary.md").is_file() and (target / "result.csv").is_file():
+                summary = _student_summary(student, target, None)
+                summary["skipped"] = True
+                results.append(summary)
+                skipped += 1
+                progress(f"跳过已完成 {i}/{len(students)} {student.name}：{summary['passed']}/{summary['cases']} 用例，{summary['score']:.1f} 分", flush=True)
+                continue
+            # Prior AI advice belongs to the previous judge run.
+            (target / 'ai-output.json').unlink(missing_ok=True)
+            command = [str(judge_path), "--root", str(root), "--code", str(student / "code"),
+                       "--tests", str(tests), "--out", str(target), "--compiler", compiler,
+                       "--timeout", str(timeout_ms)]
+            if num_tol is not None:
+                command += ["--num-tol", str(num_tol)]
+            if strict:
+                command.append("--strict")
+            command += list(extra_args or [])
+            try:
+                completed = subprocess.run(command, cwd=root, capture_output=True, timeout=judge_timeout)
+                exit_code = completed.returncode
+                log = _decode(completed.stdout) + _decode(completed.stderr)
+            except subprocess.TimeoutExpired as exc:
+                exit_code = None
+                log = "判题超时（" + str(judge_timeout) + "秒）\n" + _decode(exc.stdout or b"") + _decode(exc.stderr or b"")
+            (target / "run.log").write_text(log, encoding="utf-8")
+            summary = _student_summary(student, target, exit_code)
             results.append(summary)
-            skipped += 1
-            progress(f"跳过已完成 {i}/{len(students)} {student.name}：{summary['passed']}/{summary['cases']} 用例，{summary['score']:.1f} 分", flush=True)
-            continue
-        command = [str(judge_path), "--root", str(root), "--code", str(student / "code"),
-                   "--tests", str(tests), "--out", str(target), "--compiler", compiler,
-                   "--timeout", str(timeout_ms)]
-        if num_tol is not None:
-            command += ["--num-tol", str(num_tol)]
-        if strict:
-            command.append("--strict")
-        command += list(extra_args or [])
-        try:
-            completed = subprocess.run(command, cwd=root, capture_output=True, timeout=judge_timeout)
-            exit_code = completed.returncode
-            log = _decode(completed.stdout) + _decode(completed.stderr)
-        except subprocess.TimeoutExpired as exc:
-            exit_code = None
-            log = "判题超时（" + str(judge_timeout) + "秒）\n" + _decode(exc.stdout or b"") + _decode(exc.stderr or b"")
-        (target / "run.log").write_text(log, encoding="utf-8")
-        summary = _student_summary(student, target, exit_code)
-        results.append(summary)
-        progress(f"判题 {i}/{len(students)} {student.name}：{summary['passed']}/{summary['cases']} 用例，{summary['score']:.1f} 分", flush=True)
+            progress(f"判题 {i}/{len(students)} {student.name}：{summary['passed']}/{summary['cases']} 用例，{summary['score']:.1f} 分", flush=True)
     report = {"created_at": _now(), "exported": str(exported), "tests": str(tests),
               "judge": str(judge_path), "strict": strict, "num_tol": num_tol,
               "skipped": skipped, "students": results}

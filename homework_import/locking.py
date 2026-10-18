@@ -38,3 +38,16 @@ def locked(function):
         with workspace_lock(root):
             return function(root, *args, **kwargs)
     return wrapper
+
+
+# Serialize a student's report across workbench modules, while other students
+# and unrelated modules continue running on their own background threads.
+import threading
+_REPORT_GUARD = threading.Lock()
+_REPORT_LOCKS = {}
+
+
+def report_lock(path):
+    key = os.path.normcase(str(path.resolve()))
+    with _REPORT_GUARD:
+        return _REPORT_LOCKS.setdefault(key, threading.RLock())

@@ -270,11 +270,17 @@ class JobManager:
                "progress": [], "result": None, "error": None,
                "created_at": _now(), "updated_at": _now()}
         with self.lock:
+            active = [j for j in self.jobs.values() if j['status'] in {'queued', 'running'}]
+            if any(j['action'] == action or action == 'prepare' or j['action'] == 'prepare'
+                   or {j['action'], action} <= {'check', 'export', 'audit', 'ai-review'} for j in active):
+                raise ValueError('相同模块或共享工作区的写入任务正在运行，请稍后重试；批量判题与 AI 输出判定可同时运行')
+            job['root'] = str(self.root)
             self.jobs[job_id] = job
             self.current = job_id
             if len(self.jobs) > 50:
                 for key in list(self.jobs)[:-50]:
-                    self.jobs.pop(key, None)
+                    if self.jobs[key]['status'] not in {'queued', 'running'}:
+                        self.jobs.pop(key, None)
         threading.Thread(target=self._run, args=(job,), daemon=True).start()
         return job_id
 
@@ -290,7 +296,7 @@ class JobManager:
                 job["updated_at"] = _now()
 
         try:
-            result = dispatch(self.root, job["action"], job["params"], progress)
+            result = dispatch(Path(job['root']), job["action"], job["params"], progress)
             with self.lock:
                 job["status"] = "done"
                 job["result"] = result
@@ -304,6 +310,13 @@ class JobManager:
     def get(self, job_id):
         with self.lock:
             return copy.deepcopy(self.jobs.get(job_id, {}))
+
+    def all(self):
+        with self.lock:
+            return copy.deepcopy(list(self.jobs.values()))
+
+    def running(self):
+        return any(j['status'] in {'queued', 'running'} for j in self.all())
 
     def last(self):
         with self.lock:
@@ -343,7 +356,8 @@ def dispatch(root: Path, action: str, params: dict, progress):
         stage = params.get("stage", "all")
         stages = ("triage", "requirements") if stage == "all" else (stage,)
         return run_review(workspace, provider, stages, params.get("only", "needs_review"),
-                          int(params.get("max", 0)), bool(params.get("force")), progress=progress)
+                          int(params.get("max", 0)), bool(params.get("force")), progress=progress,
+                          document_id=params.get('document_id'), candidate_id=params.get('candidate_id'))
     if action == "judge-batch":
         exported = Path(params["exported"]).resolve()
         if not has_student_code(exported):
@@ -443,7 +457,17 @@ def student_detail(root: Path, settings: dict, document_id: str):
             if isinstance(ai_item, dict):
                 item["ai_output"] = ai_item
             report["cases"].append(item)
-    return {"document": document, "report": report}
+    report['compilation'] = {}
+    if report_dir:
+        for row in report['result']:
+            problem_id = str(row.get('题号', ''))
+            if problem_id.isdigit():
+                log_path = report_dir / 'log' / f'p{problem_id}.compile.log'
+                report['compilation'][problem_id] = {
+                    'status': row.get('状态', ''), 'path': str(log_path),
+                    'log': _limited_text(log_path, 100000)}
+    return {"document": document, "report": report,
+            "assignment": read_json(root / 'assignment.json')}
 
 
 def student_overview(root: Path, settings: dict):

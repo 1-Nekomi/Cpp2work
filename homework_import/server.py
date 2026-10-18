@@ -71,13 +71,13 @@ def make_server(root: Path, port=0):
                             return self.respond({"workspace": str(root), "summary": empty_summary(),
                                                  "assignment_status": "missing",
                                                  "settings": public_settings(settings),
-                                                 "students": [], "job": jobs.last(), "missing": True})
+                                                 "students": [], "jobs": jobs.all(), "job": jobs.last(), "missing": True})
                         state = read_json(root / "batch.json")
                         return self.respond({"workspace": str(root), "summary": summary(state),
                                              "assignment_status": read_json(root / "assignment.json").get("status"),
                                              "settings": public_settings(settings),
                                              "students": student_overview(root, settings),
-                                             "job": jobs.last()})
+                                             "jobs": jobs.all(), "job": jobs.last()})
                     if parsed.path == "/api/ui/student":
                         if not has_batch(root):
                             raise ValueError("当前工作目录还没有导入批次，请先使用“导入”")
@@ -85,7 +85,7 @@ def make_server(root: Path, port=0):
                         return self.respond(student_detail(root, load_settings(root), ident))
                     if parsed.path == "/api/ui/job":
                         job_id = query.get("id", [""])[0]
-                        return self.respond(jobs.get(job_id) if job_id else jobs.last())
+                        return self.respond(jobs.get(job_id) if job_id else {"jobs": jobs.all()})
                     if parsed.path == "/api/ui/settings":
                         return self.respond(public_settings(load_settings(root)))
                     if parsed.path == "/api/ui/artifact":
@@ -162,8 +162,7 @@ def make_server(root: Path, port=0):
                     return self.respond(start_local_ai(root, load_settings(root)))
                 with lock:
                     if parsed.path == "/api/ui/workspace":
-                        last = jobs.last()
-                        if last.get("status") in {"queued", "running"}:
+                        if jobs.running():
                             raise ValueError("已有任务在运行，请等待完成后再切换工作目录")
                         target = Path(str(payload.get("path", "")).strip()).expanduser().resolve()
                         if not str(payload.get("path", "")).strip() or not target.is_dir():
@@ -180,9 +179,6 @@ def make_server(root: Path, port=0):
                             raise ValueError("参数格式错误")
                         if action not in {"prepare", "test-ai"} and not has_batch(root):
                             raise ValueError("当前工作目录还没有导入批次，请先使用“导入”")
-                        last = jobs.last()
-                        if last.get("status") in {"queued", "running"}:
-                            raise ValueError("已有任务在运行，请等待完成后再启动")
                         job_id = jobs.start(action, params)
                         return self.respond({"job": jobs.get(job_id)})
                     if parsed.path == "/api/ui/settings":
