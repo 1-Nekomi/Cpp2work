@@ -364,16 +364,27 @@ def student_detail(root: Path, settings: dict, document_id: str):
     if document is None:
         raise ValueError("找不到该学生")
     attach_ai_to_candidates(root, document)
-    report = {"dir": None, "cases": [], "result": []}
+    report = {"dir": None, "cases": [], "result": [], "ai_output_path": None}
     report_dir = _report_dir(settings, document)
     if report_dir:
         report["dir"] = str(report_dir)
         report["result"] = read_csv(report_dir / "result.csv")
+        ai_output = {}
+        ai_path = report_dir / "ai-output.json"
+        if ai_path.is_file():
+            try:
+                ai_output = read_json(ai_path).get("items", {}) or {}
+                report["ai_output_path"] = str(ai_path)
+            except (OSError, ValueError):
+                ai_output = {}
         for row in read_csv(report_dir / "cases.csv"):
             item = dict(row)
             item["expected_text"] = _limited_text(row.get("预期文件", "")) if row.get("结果") != "通过" else ""
             item["actual_text"] = _limited_text(row.get("实际输出", "")) if row.get("结果") != "通过" else ""
             item["diff_text"] = _limited_text(row.get("差异说明", "")) if row.get("结果") != "通过" else ""
+            ai_item = ai_output.get(f"p{row.get('题号')}/{row.get('用例')}")
+            if isinstance(ai_item, dict):
+                item["ai_output"] = ai_item
             report["cases"].append(item)
     return {"document": document, "report": report}
 

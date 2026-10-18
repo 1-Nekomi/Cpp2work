@@ -14,6 +14,7 @@ from homework_import.ai import AIConfig, AIProvider
 from homework_import.ai_review import (attach_ai_to_candidates, deterministic_checks, load_results,
                                        run_output_review, run_review)
 from homework_import.server import make_server
+from homework_import.workbench import student_detail
 from homework_import.workspace import prepare, read_json, write_json
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -155,6 +156,11 @@ class AITests(unittest.TestCase):
         self.assertTrue((reports / "ai-output.csv").is_file())
         payload = json.loads((student / "ai-output.json").read_text(encoding="utf-8"))
         self.assertEqual(payload["items"]["p1/case1"]["verdict"], "format_only")
+        document_id = read_json(workspace / "batch.json")["documents"][0]["id"]
+        detail = student_detail(workspace, {"reports": str(reports)}, document_id)
+        case = next(c for c in detail["report"]["cases"] if c["题号"] == "1" and c["用例"] == "case1")
+        self.assertEqual(case["ai_output"]["verdict"], "format_only")
+        self.assertEqual(case["ai_output"]["suggested_accept"], True)
 
     def test_provider_cache_reuses_response(self):
         cache = self.root / "cache"
