@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
@@ -15,15 +16,54 @@
 
 namespace judge {
 
+#ifdef _WIN32
+std::string wide_to_utf8(const std::wstring& s) {
+    if (s.empty()) return std::string();
+    const int length = WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()),
+                                           nullptr, 0, nullptr, nullptr);
+    if (length <= 0) return std::string();
+    std::string result(static_cast<size_t>(length), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), result.data(), length,
+                        nullptr, nullptr);
+    return result;
+}
+
+std::string acp_to_utf8(const std::string& s) {
+    if (s.empty()) return s;
+    const int length = MultiByteToWideChar(CP_ACP, 0, s.data(), static_cast<int>(s.size()),
+                                           nullptr, 0);
+    if (length <= 0) return s;
+    std::wstring wide(static_cast<size_t>(length), L'\0');
+    MultiByteToWideChar(CP_ACP, 0, s.data(), static_cast<int>(s.size()), wide.data(), length);
+    return wide_to_utf8(wide);
+}
+
+std::wstring utf8_to_wide(const std::string& s) {
+    if (s.empty()) return std::wstring();
+    int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(),
+                                     static_cast<int>(s.size()), nullptr, 0);
+    const UINT code_page = length > 0 ? CP_UTF8 : CP_ACP;
+    if (length <= 0) {
+        length = MultiByteToWideChar(CP_ACP, 0, s.data(), static_cast<int>(s.size()),
+                                     nullptr, 0);
+    }
+    if (length <= 0) return std::wstring();
+    std::wstring wide(static_cast<size_t>(length), L'\0');
+    MultiByteToWideChar(code_page, 0, s.data(), static_cast<int>(s.size()), wide.data(), length);
+    return wide;
+}
+#endif
+
 // ------------------------------------------------------------------ 文件读写
 
 bool file_exists(const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
+    // 用 filesystem::path 重载，Windows 下才能正确地把 UTF-8 路径转成宽字符。
+    std::ifstream f(std::filesystem::path(path), std::ios::binary);
     return f.good();
 }
 
 bool read_file(const std::string& path, std::string* out) {
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f(std::filesystem::path(path), std::ios::binary);
     if (!f) return false;
     std::ostringstream ss;
     ss << f.rdbuf();
@@ -32,7 +72,7 @@ bool read_file(const std::string& path, std::string* out) {
 }
 
 bool write_file(const std::string& path, const std::string& data) {
-    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    std::ofstream f(std::filesystem::path(path), std::ios::binary | std::ios::trunc);
     if (!f) return false;
     f.write(data.data(), static_cast<std::streamsize>(data.size()));
     return static_cast<bool>(f);

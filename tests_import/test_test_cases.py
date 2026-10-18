@@ -115,6 +115,25 @@ class TestCaseEditorTests(unittest.TestCase):
         fourth = run_batch(exported, self.root, reports, str(JUDGE), progress=progress)
         self.assertEqual(fourth['skipped'], 1)
 
+    @unittest.skipUnless(JUDGE.is_file() and shutil.which('g++'), '需要已构建的 judge.exe 和 g++')
+    def test_real_judge_handles_non_ascii_test_and_report_paths(self):
+        base = self.base / '实验报告'
+        tests = base / 'tests'
+        (tests / 'p1').mkdir(parents=True)
+        (tests / 'p1' / 'case1.in').write_bytes(b'1 2\n')
+        (tests / 'p1' / 'case1.exp').write_bytes(b'3\n')
+        exported = base / '输出'
+        (exported / 'student' / 'code').mkdir(parents=True)
+        (exported / 'student' / 'code' / 'p1.cpp').write_text(
+            '#include <iostream>\nint main(){int a,b;std::cin>>a>>b;std::cout<<a+b<<"\\n";}\n',
+            encoding='utf-8')
+        reports = base / '判题报告'
+        update_case(tests, {**read_case(tests, 'p1', 'case1'), 'action': 'save',
+                            'input': '10 20\n', 'expected': '30\n'})
+        result = run_batch(exported, tests, reports, str(JUDGE), progress=lambda *a, **k: None)
+        self.assertEqual((result['skipped'], result['cases'], result['passed']), (0, 1, 1))
+        self.assertTrue((reports / 'student' / 'result.csv').is_file())
+
     def test_http_editor_saves_and_blocks_writes_during_judging(self):
         import threading
         import urllib.request

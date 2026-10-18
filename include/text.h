@@ -50,6 +50,15 @@ bool read_file(const std::string& path, std::string* out);
 bool write_file(const std::string& path, const std::string& data);
 std::string trim(const std::string& s);
 
+#ifdef _WIN32
+// Windows 下 argv、getenv 等窄字符接口返回系统 ANSI（中文系统为 GBK），
+// 而 libstdc++ 的 std::filesystem 按 UTF-8 解释窄字符路径，因此进入判题器后
+// 统一转换为 UTF-8。调用 Win32 宽字符 API 前再转回 UTF-16。
+std::string acp_to_utf8(const std::string& s);
+std::string wide_to_utf8(const std::wstring& s);
+std::wstring utf8_to_wide(const std::string& s);
+#endif
+
 // Windows: convert UTF-16/GB18030 or mixed UTF-8 + legacy console output to UTF-8.
 // Other platforms return the bytes unchanged.
 std::string to_utf8(const std::string& bytes);

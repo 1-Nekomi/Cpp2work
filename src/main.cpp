@@ -74,9 +74,9 @@ std::string join_path(const std::string& a, const std::string& b) {
 // 当前可执行文件的完整路径
 std::string self_exe_path() {
 #ifdef _WIN32
-    char buf[MAX_PATH * 4];
-    DWORD n = GetModuleFileNameA(nullptr, buf, static_cast<DWORD>(sizeof buf));
-    if (n > 0 && n < sizeof buf) return std::string(buf, n);
+    wchar_t buf[MAX_PATH * 4];
+    DWORD n = GetModuleFileNameW(nullptr, buf, static_cast<DWORD>(sizeof buf / sizeof buf[0]));
+    if (n > 0 && n < sizeof buf / sizeof buf[0]) return wide_to_utf8(std::wstring(buf, n));
     return std::string();
 #elif defined(__APPLE__)
     char buf[4096];
@@ -102,17 +102,18 @@ std::string win_quote(const std::string& s) { return shell_quote(s); }
 int spawn_self(const std::vector<std::string>& args) {
     const std::string exe = self_exe_path();
     if (exe.empty()) return -1;
-    std::string cmdline = win_quote(exe);
-    for (const std::string& a : args) cmdline += " " + win_quote(a);
-    std::vector<char> buf(cmdline.begin(), cmdline.end());
-    buf.push_back('\0');
+    const std::wstring wexe = utf8_to_wide(exe);
+    std::wstring cmdline = utf8_to_wide(win_quote(exe));
+    for (const std::string& a : args) cmdline += L" " + utf8_to_wide(win_quote(a));
+    std::vector<wchar_t> buf(cmdline.begin(), cmdline.end());
+    buf.push_back(L'\0');
 
-    STARTUPINFOA si;
+    STARTUPINFOW si;
     ZeroMemory(&si, sizeof si);
     si.cb = sizeof si;
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof pi);
-    if (!CreateProcessA(exe.c_str(), buf.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si,
+    if (!CreateProcessW(wexe.c_str(), buf.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si,
                         &pi)) {
         return -1;
     }
@@ -789,6 +790,19 @@ void judge_and_assert(const Options& opt, const ProblemSpec& spec,
 
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0); // 行缓冲：fork/assert abort 时不会丢日志
+
+#ifdef _WIN32
+    // CRT 把命令行从 UTF-16 转成系统 ANSI 编码，而 libstdc++ 的文件系统按 UTF-8
+    // 解释窄字符路径。先统一转成 UTF-8，判题器内部才能处理中文目录。
+    std::vector<std::string> utf8_args;
+    utf8_args.reserve(static_cast<size_t>(argc));
+    for (int i = 0; i < argc; ++i)
+        utf8_args.push_back(argv[i] ? acp_to_utf8(argv[i]) : std::string());
+    std::vector<char*> utf8_argv;
+    utf8_argv.reserve(utf8_args.size());
+    for (std::string& a : utf8_args) utf8_argv.push_back(a.data());
+    argv = utf8_argv.data();
+#endif
 
     Args args;
     if (!parse_args(argc, argv, &args)) return 2;

@@ -50,7 +50,12 @@ static bool looks_like_root(const std::string& dir) {
 
 std::string find_project_root(const std::string& hint_exe_dir) {
     if (const char* env = std::getenv("JUDGE_ROOT")) {
-        if (looks_like_root(env)) return fs::absolute(env).lexically_normal().string();
+#ifdef _WIN32
+        const std::string root = acp_to_utf8(env);
+#else
+        const std::string root = env;
+#endif
+        if (looks_like_root(root)) return fs::absolute(root).lexically_normal().string();
     }
     std::vector<std::string> candidates;
     std::error_code ec;

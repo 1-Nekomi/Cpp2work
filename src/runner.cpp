@@ -87,7 +87,7 @@ std::string win_last_error() {
                        FORMAT_MESSAGE_IGNORE_INSERTS,
                    nullptr, e, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), reinterpret_cast<LPSTR>(&msg),
                    0, nullptr);
-    std::string s = msg ? msg : "未知错误";
+    std::string s = msg ? acp_to_utf8(msg) : "未知错误";
     if (msg) LocalFree(msg);
     while (!s.empty() && (s.back() == '\r' || s.back() == '\n' || s.back() == ' ')) s.pop_back();
     return s + " (代码 " + std::to_string(static_cast<unsigned long>(e)) + ")";
@@ -143,7 +143,8 @@ std::string shell_quote(const std::string& s) {
 
 int run_shell_capture(const std::string& cmd, std::string* output) {
 #ifdef _WIN32
-    FILE* p = _popen((cmd + " 2>&1").c_str(), "r");
+    const std::wstring wide_cmd = utf8_to_wide(cmd + " 2>&1");
+    FILE* p = _wpopen(wide_cmd.c_str(), L"r");
 #else
     FILE* p = popen((cmd + " 2>&1").c_str(), "r");
 #endif
@@ -306,11 +307,12 @@ static RunOut run_case_pipe_win(const Options& opt, const std::string& exe,
     }
     SetHandleInformation(out_r, HANDLE_FLAG_INHERIT, 0);
 
-    HANDLE err_h = CreateFileA(err_file.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+    const std::wstring werr_file = utf8_to_wide(err_file);
+    HANDLE err_h = CreateFileW(werr_file.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (err_h == INVALID_HANDLE_VALUE) err_h = out_w;
 
-    STARTUPINFOA si;
+    STARTUPINFOW si;
     ZeroMemory(&si, sizeof si);
     si.cb = sizeof si;
     si.dwFlags = STARTF_USESTDHANDLES;
@@ -318,14 +320,16 @@ static RunOut run_case_pipe_win(const Options& opt, const std::string& exe,
     si.hStdOutput = out_w;
     si.hStdError = err_h;
 
-    std::string cmdline = shell_quote(exe);
-    std::vector<char> cbuf(cmdline.begin(), cmdline.end());
-    cbuf.push_back('\0');
+    const std::wstring wexe = utf8_to_wide(exe);
+    std::wstring cmdline = utf8_to_wide(shell_quote(exe));
+    std::vector<wchar_t> cbuf(cmdline.begin(), cmdline.end());
+    cbuf.push_back(L'\0');
+    const std::wstring wcode_dir = utf8_to_wide(opt.code_dir);
 
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof pi);
-    BOOL ok = CreateProcessA(exe.c_str(), cbuf.data(), nullptr, nullptr, TRUE, 0, nullptr,
-                             opt.code_dir.empty() ? nullptr : opt.code_dir.c_str(), &si, &pi);
+    BOOL ok = CreateProcessW(wexe.c_str(), cbuf.data(), nullptr, nullptr, TRUE, 0, nullptr,
+                             opt.code_dir.empty() ? nullptr : wcode_dir.c_str(), &si, &pi);
 
     // 父进程关闭子进程那一端的句柄
     CloseHandle(in_r);
@@ -473,7 +477,7 @@ static RunOut run_case_conpty_win(const Options& opt, const std::string& exe,
         return run_case_pipe_win(opt, exe, in_file, err_file, timeout_ms);
     }
 
-    STARTUPINFOEXA si;
+    STARTUPINFOEXW si;
     ZeroMemory(&si, sizeof si);
     si.StartupInfo.cb = sizeof si;
     SIZE_T bytes = 0;
@@ -486,17 +490,19 @@ static RunOut run_case_conpty_win(const Options& opt, const std::string& exe,
                                              PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, hpc,
                                              sizeof(HPCON), nullptr, nullptr);
 
-    std::string cmdline = shell_quote(exe);
-    std::vector<char> cbuf(cmdline.begin(), cmdline.end());
-    cbuf.push_back('\0');
+    const std::wstring wexe = utf8_to_wide(exe);
+    std::wstring cmdline = utf8_to_wide(shell_quote(exe));
+    std::vector<wchar_t> cbuf(cmdline.begin(), cmdline.end());
+    cbuf.push_back(L'\0');
+    const std::wstring wcode_dir = utf8_to_wide(opt.code_dir);
 
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof pi);
     BOOL ok = FALSE;
     if (attr_ok) {
-        ok = CreateProcessA(exe.c_str(), cbuf.data(), nullptr, nullptr, FALSE,
+        ok = CreateProcessW(wexe.c_str(), cbuf.data(), nullptr, nullptr, FALSE,
                             EXTENDED_STARTUPINFO_PRESENT, nullptr,
-                            opt.code_dir.empty() ? nullptr : opt.code_dir.c_str(),
+                            opt.code_dir.empty() ? nullptr : wcode_dir.c_str(),
                             &si.StartupInfo, &pi);
     }
     if (si.lpAttributeList) {
@@ -769,11 +775,14 @@ static RunOut run_case_plain_win(const Options& opt, const std::string& exe,
     sa.lpSecurityDescriptor = nullptr;
     sa.bInheritHandle = TRUE;
 
-    HANDLE in_h = CreateFileA(input_path.c_str(), GENERIC_READ, FILE_SHARE_READ, &sa, OPEN_EXISTING,
+    const std::wstring winput_path = utf8_to_wide(input_path);
+    const std::wstring wout_tmp = utf8_to_wide(out_tmp);
+    const std::wstring werr_file = utf8_to_wide(err_file);
+    HANDLE in_h = CreateFileW(winput_path.c_str(), GENERIC_READ, FILE_SHARE_READ, &sa, OPEN_EXISTING,
                               FILE_ATTRIBUTE_NORMAL, nullptr);
-    HANDLE out_h = CreateFileA(out_tmp.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS,
+    HANDLE out_h = CreateFileW(wout_tmp.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS,
                                FILE_ATTRIBUTE_NORMAL, nullptr);
-    HANDLE err_h = CreateFileA(err_file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS,
+    HANDLE err_h = CreateFileW(werr_file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS,
                                FILE_ATTRIBUTE_NORMAL, nullptr);
     if (in_h == INVALID_HANDLE_VALUE || out_h == INVALID_HANDLE_VALUE ||
         err_h == INVALID_HANDLE_VALUE) {
@@ -785,7 +794,7 @@ static RunOut run_case_plain_win(const Options& opt, const std::string& exe,
         return r;
     }
 
-    STARTUPINFOA si;
+    STARTUPINFOW si;
     ZeroMemory(&si, sizeof si);
     si.cb = sizeof si;
     si.dwFlags = STARTF_USESTDHANDLES;
@@ -793,14 +802,16 @@ static RunOut run_case_plain_win(const Options& opt, const std::string& exe,
     si.hStdOutput = out_h;
     si.hStdError = err_h;
 
-    std::string cmdline = shell_quote(exe);
-    std::vector<char> cbuf(cmdline.begin(), cmdline.end());
-    cbuf.push_back('\0');
+    const std::wstring wexe = utf8_to_wide(exe);
+    std::wstring cmdline = utf8_to_wide(shell_quote(exe));
+    std::vector<wchar_t> cbuf(cmdline.begin(), cmdline.end());
+    cbuf.push_back(L'\0');
+    const std::wstring wcode_dir = utf8_to_wide(opt.code_dir);
 
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof pi);
-    BOOL ok = CreateProcessA(exe.c_str(), cbuf.data(), nullptr, nullptr, TRUE, 0, nullptr,
-                             opt.code_dir.empty() ? nullptr : opt.code_dir.c_str(), &si, &pi);
+    BOOL ok = CreateProcessW(wexe.c_str(), cbuf.data(), nullptr, nullptr, TRUE, 0, nullptr,
+                             opt.code_dir.empty() ? nullptr : wcode_dir.c_str(), &si, &pi);
     CloseHandle(in_h);
     CloseHandle(out_h);
     CloseHandle(err_h);
