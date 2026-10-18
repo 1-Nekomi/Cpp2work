@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>C++ 作业判题工作台</title>
+<style>
+:root{font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#182b2a;background:#eef3f1;font-size:14px}
+*{box-sizing:border-box}body{margin:0}
+button,input,select,textarea{font:inherit}
+button{cursor:pointer;border:1px solid #c5d4cf;border-radius:8px;background:#fff;padding:8px 12px;color:#183332}
+button:hover{background:#e9f2ee}button:disabled{opacity:.55;cursor:wait}
+button.primary{background:#176858;border-color:#176858;color:#fff}button.primary:hover{background:#12584b}
+button.danger{color:#a3342b}button.ghost{border-color:transparent;background:transparent}
+input,select,textarea{border:1px solid #b9cbc5;border-radius:7px;padding:8px 10px;background:#fff;max-width:100%}
+textarea{width:100%;line-height:1.55;resize:vertical}
+h1{font-size:20px;margin:0}h2{font-size:18px;margin:0 0 10px}h3{font-size:15px;margin:0 0 8px}
+p{line-height:1.65;margin:8px 0}
+header{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #d8e4df;padding:12px 20px;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.brand{min-width:220px}.sub{color:#637c73;font-size:12px;margin-top:4px}
+nav{display:flex;gap:4px;flex-wrap:wrap;flex:1}
+nav button{border-color:transparent;background:transparent;padding:8px 10px}
+nav button.active{background:#e2f1ea;color:#12584b;font-weight:600}
+.header-actions{display:flex;gap:8px;align-items:center}
+#job-badge{font-size:12px;padding:5px 9px;border-radius:20px;background:#e7eee9;color:#38594a}
+#job-badge.running{background:#fff0cf;color:#875815}#job-badge.done{background:#dff4e8;color:#176858}
+#job-badge.error{background:#fbe4df;color:#97382a}
+main{padding:18px 20px 80px;max-width:1500px;margin:0 auto}
+.panel{background:#fff;border:1px solid #d9e4df;border-radius:12px;padding:16px;margin-bottom:16px}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}
+.metric{background:#fff;border:1px solid #d9e4df;border-radius:10px;padding:12px}
+.metric strong{display:block;font-size:24px;color:#176858}.metric span{color:#637c73;font-size:12px}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.notice{border-radius:8px;padding:10px 12px;background:#f4f8f6;border:1px solid #d8e5df;white-space:pre-wrap;line-height:1.55}
+.notice.warn{background:#fff7e6;border-color:#f0dfb6;color:#7b5712}
+.notice.error{background:#fdf0ed;border-color:#f0c9bf;color:#8f3224}
+.small{font-size:12px;color:#637c73}
+.workspace{display:grid;grid-template-columns:310px minmax(0,1fr);gap:14px;align-items:start}
+.student-list{max-height:calc(100vh - 250px);overflow:auto}
+.student-item{width:100%;text-align:left;border:0;border-bottom:1px solid #edf2ef;border-radius:0;padding:11px 10px;background:#fff}
+.student-item.selected{background:#e4f1eb;border-left:4px solid #176858}
+.badge{display:inline-block;font-size:11px;border-radius:5px;padding:2px 6px;background:#e7eee9;color:#38594a;margin:3px 4px 0 0}
+.badge.warn{background:#fff0d0;color:#875815}.badge.bad{background:#fbe4df;color:#97382a}
+.badge.good{background:#dff4e8;color:#176858}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.tabs button.active{background:#176858;color:#fff;border-color:#176858}
+.code{background:#10211f;color:#d9efe8;border-radius:9px;padding:10px 0;overflow:auto;max-height:440px;font-family:Consolas,"Cascadia Mono",monospace;font-size:13px;line-height:1.55}
+.code-line{display:flex;white-space:pre}
+.code-line .ln{display:inline-block;min-width:46px;color:#69857d;text-align:right;padding-right:12px;user-select:none}
+pre.plain{white-space:pre-wrap;word-break:break-word;background:#f7faf9;border:1px solid #e3ebe7;border-radius:8px;padding:10px;max-height:300px;overflow:auto;font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;border-bottom:1px solid #e8eeeb;padding:8px 6px;vertical-align:top}
+th{color:#5c746b;font-weight:600;background:#f7faf8}
+.status-pass{color:#176858;font-weight:600}.status-fail{color:#a3342b;font-weight:600}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+label.field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#4d665d}
+label.field input,label.field select,label.field textarea{font-size:14px;color:#182b2a}
+.path-row{display:flex;gap:6px}.path-row input{flex:1}.path-row button{white-space:nowrap}
+details{border:1px solid #e4ece8;border-radius:8px;padding:8px 10px;margin:8px 0;background:#fbfdfc}
+details summary{cursor:pointer;font-weight:600}
+.job-drawer{position:fixed;right:18px;bottom:18px;width:min(560px,calc(100vw - 36px));max-height:58vh;overflow:auto;background:#fff;border:1px solid #cfded8;border-radius:12px;box-shadow:0 12px 36px rgba(20,50,44,.18);padding:14px;z-index:30}
+.job-drawer[hidden]{display:none}
+.job-log{white-space:pre-wrap;word-break:break-word;background:#10211f;color:#d9efe8;border-radius:8px;padding:10px;max-height:34vh;overflow:auto;font-size:12px;line-height:1.5}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#183332;color:#fff;padding:10px 16px;border-radius:8px;z-index:50;max-width:80vw;white-space:pre-wrap}
+.toast.error{background:#8f3224}
+.section-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:4px 0 10px}
+.split{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:14px}
+@media(max-width:1050px){.workspace{grid-template-columns:1fr}.split{grid-template-columns:1fr}.student-list{max-height:300px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><h1>C++ 作业判题工作台</h1><div class="sub">导入 · 复核 · 判题 · AI 辅助</div></div>
+  <nav id="menu">
+    <button data-view="overview">概览</button>
+    <button data-view="students">学生与判题</button>
+    <button data-view="review">人工复核</button>
+    <button data-view="import">导入</button>
+    <button data-view="check">语法检查</button>
+    <button data-view="audit">审计</button>
+    <button data-view="export">导出</button>
+    <button data-view="ai-review">AI 复核</button>
+    <button data-view="judge-batch">批量判题</button>
+    <button data-view="ai-output">AI 输出判定</button>
+    <button data-view="settings">设置</button>
+  </nav>
+  <div class="header-actions"><span id="job-badge">空闲</span><button id="refresh">刷新</button></div>
+</header>
+<main>
+  <section id="view"></section>
+</main>
+<section id="job-drawer" class="job-drawer" hidden>
+  <div class="section-title"><h3 id="job-title">任务</h3><button id="job-close" class="ghost">关闭</button></div>
+  <div id="job-status" class="small"></div>
+  <pre id="job-log" class="job-log"></pre>
+</section>
+<div id="toast" class="toast" hidden></div>
+<script>
+const TOKEN='__TOKEN__';
+const $=id=>document.getElementById(id);
+let state={},currentView='overview',currentStudent=null,currentCandidate=null,studentData=null,currentJob=null,busy=false,studentFilter='',autoRefresh=true;
+let lastStateAt=0;
+const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=text;if(cls)n.className=cls;return n};
+const button=(text,fn,cls='')=>{const n=el('button',text,cls);n.onclick=fn;return n};
+const badge=(text,cls='')=>el('span',text,'badge '+(cls||''));
+const fmt=value=>JSON.stringify(value,null,2);
+let toastTimer;
+function toast(message,error=false){$('toast').textContent=message;$('toast').className='toast'+(error?' error':'');$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,error?12000:7000)}
+async function api(path,data,params={}){const q=new URLSearchParams({...params,token:TOKEN});const res=await fetch(path+'?'+q,data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{});let value;try{value=await res.json()}catch(e){value={error:'服务返回格式错误'}}if(!res.ok)throw Error(value.error||'请求失败');return value}
+async function safe(fn){try{await fn()}catch(e){toast(e.message,true)}}
+function setActive(view){document.querySelectorAll('#menu button').forEach(b=>b.classList.toggle('active',b.dataset.view===view))}
+function showJobBadge(job){const b=$('job-badge');if(!job||!job.status){b.textContent='空闲';b.className='';return}b.textContent={queued:'排队中',running:'运行中',done:'已完成',error:'失败'}[job.status]||job.status;b.className=job.status==='running'||job.status==='queued'?'running':job.status}
+async function loadState(){state=await api('/api/ui/state');lastStateAt=Date.now();showJobBadge(currentJob||state.job);if(currentView==='overview')renderOverview();if(currentView==='students'){renderStudentList();if(currentStudent)await loadStudent(currentStudent,true)}}
+function field(label,id,value='',opts={}){const wrap=el('label',label,'field');let input;if(opts.type==='select'){input=el('select');for(const [v,t] of opts.options||[]){const o=el('option',t);o.value=v;input.append(o)}input.value=value??''}else if(opts.type==='textarea'){input=el('textarea');input.rows=opts.rows||3;input.value=value??''}else{input=el('input');input.type=opts.type||'text';input.value=value??'';input.placeholder=opts.placeholder||''}input.id=id;if(opts.min!==undefined)input.min=opts.min;if(opts.step!==undefined)input.step=opts.step;wrap.append(input);if(opts.hint)wrap.append(el('div',opts.hint,'small'));return wrap}
+function pathField(label,id,value='',mode='file',filter='',title='选择文件'){const wrap=el('label',label,'field');const row=el('div',undefined,'path-row');const input=el('input');input.id=id;input.value=value??'';const pick=button('选择…',()=>safe(async()=>{const r=await api('/api/ui/select-path',{mode,title,filter});if(r.path)input.value=r.path}));row.append(input,pick);wrap.append(row);return wrap}
+function collect(ids){const out={};for(const id of ids){const node=$(id);if(!node)continue;out[id.replace(/^f-/,'').replace(/-/g,'_')]=node.type==='checkbox'?node.checked:node.value}return out}
+function formView(title,description,fields,action,submitText='开始'){currentView='form';const content=$('view');content.replaceChildren();const panel=el('div',undefined,'panel');panel.append(el('h2',title));panel.append(el('p',description||'','small'));const grid=el('div',undefined,'form-grid');for(const item of fields)grid.append(item);panel.append(grid);const bar=el('div',undefined,'toolbar');bar.style.marginTop='14px';bar.append(button(submitText,()=>safe(()=>startJob(action,collect(fields.map(f=>f.querySelector('input,select,textarea')?.id).filter(Boolean)))),'primary'));panel.append(bar);content.append(panel)}
+async function persistActionSettings(action,params){const p={};if(action==='judge-batch'){p.exported=params.exported;p.tests=params.tests;p.reports=params.out;p.judge=params.judge;p.compiler=params.compiler}else if(action==='ai-output'){p.workspace=params.workspace;p.reports=params.reports;p.tests=params.tests}else if(['ai-review','check','audit'].includes(action)){p.workspace=params.workspace}else if(action==='import'){p.teacher=params.teacher;p.submissions=params.submissions}else if(action==='export'){p.exported=params.out}if(Object.keys(p).length)await api('/api/ui/settings',p)}
+function validateAction(action,p){const need=(ok,msg)=>{if(!ok)throw Error(msg)};if(action==='import')need(p.teacher&&p.submissions&&p.out,'请填写教师模板、学生报告目录和输出目录');if(action==='check'||action==='audit'||action==='ai-review')need(p.workspace,'请填写工作目录');if(action==='export')need(p.workspace&&p.out,'请填写工作目录和导出目录');if(action==='judge-batch')need(p.exported&&p.tests&&p.out,'请填写导出目录、测试用例目录和报告输出目录');if(action==='ai-output')need(p.workspace&&p.reports,'请填写工作目录和判题报告目录')}
+async function startJob(action,params){validateAction(action,params);try{await persistActionSettings(action,params)}catch(e){}const r=await api('/api/ui/job',{action,params});currentJob=r.job;showJobDrawer();toast('任务已启动');showJobBadge(currentJob)}
+function showJobDrawer(){$('job-drawer').hidden=false;if(currentJob){$('job-title').textContent='任务：'+currentJob.action;$('job-status').textContent='状态：'+currentJob.status;$('job-log').textContent=(currentJob.progress||[]).join('\n')}}
+function renderJob(job){currentJob=job;showJobBadge(job);$('job-title').textContent='任务：'+job.action;$('job-status').textContent='状态：'+job.status+(job.error?'；'+job.error:'');const text=(job.progress||[]).join('\n');if(job.result!==null&&job.result!==undefined)text+='\n\n结果：\n'+fmt(job.result);$('job-log').textContent=text;$('job-log').scrollTop=$('job-log').scrollHeight}
+async function tick(){if(busy)return;busy=true;try{if(currentJob&&['queued','running'].includes(currentJob.status)){const job=await api('/api/ui/job',null,{id:currentJob.id});renderJob(job);if(['done','error'].includes(job.status)){toast(job.status==='done'?'任务完成':'任务失败：'+(job.error||''),job.status==='error');await loadState();if(job.status==='done'&&$('artifact')){if(job.action==='ai-review')await loadArtifact('ai-review');if(job.action==='ai-output')await loadArtifact('ai-output')}}}else if(currentView==='students'&&Date.now()-lastStateAt>4000){await loadState()}}catch(e){if(currentJob&&['queued','running'].includes(currentJob.status))toast(e.message,true)}finally{busy=false}}
+function renderOverview(){const c=$('view');c.replaceChildren();const s=state.summary||{};const p=el('div',undefined,'panel');p.append(el('h2','概览'));const m=el('div',undefined,'metrics');for(const [key,label] of [['documents','份报告'],['candidates','段源码'],['auto_ready','自动就绪'],['needs_review','待复核'],['compile_ok','语法通过'],['compile_failed','语法失败'],['document_reviews','文档异常'],['approved','已确认']]){const box=el('div',undefined,'metric');box.append(el('strong',s[key]??0),el('span',label));m.append(box)}p.append(m);p.append(el('p','教师配置：'+(state.assignment_status==='confirmed'?'已确认':'草稿（未确认不能导出）'),'notice'));const bar=el('div',undefined,'toolbar');bar.append(button('打开人工复核',()=>window.open('/review?token='+encodeURIComponent(TOKEN),'_blank'),'primary'),button('学生与判题',()=>showView('students')),button('AI 复核',()=>showView('ai-review')),button('批量判题',()=>showView('judge-batch')),button('设置',()=>showView('settings')));p.append(bar);c.append(p);const paths=el('div',undefined,'panel');paths.append(el('h3','当前路径'),el('div','工作目录：'+(state.workspace||''),'small'),el('div','导出目录：'+(state.settings?.exported||'（未设置）'),'small'),el('div','判题报告：'+(state.settings?.reports||'（未设置）'),'small'),el('div','测试用例：'+(state.settings?.tests||'（未设置）'),'small'));c.append(paths)}
+function renderStudents(){const c=$('view');c.replaceChildren();const layout=el('div',undefined,'workspace');const left=el('div',undefined,'panel');left.append(el('div',undefined,'section-title'));const title=el('h2','学生');left.append(title);const search=el('input');search.placeholder='搜索姓名、学号或文件名';search.value=studentFilter;search.id='student-search';search.oninput=()=>{studentFilter=search.value;renderStudentList()};left.append(search);const auto=el('label');const cb=el('input');cb.type='checkbox';cb.checked=autoRefresh;cb.id='auto-refresh';cb.onchange=()=>{autoRefresh=cb.checked};auto.append(cb,document.createTextNode(' 自动刷新'));left.append(auto);const list=el('div');list.id='student-list';list.className='student-list';left.append(list);const right=el('div');right.id='student-detail';layout.append(left,right);c.append(layout);renderStudentList();const target=currentStudent||(state.students||[]).find(s=>s.report)?.id||(state.students||[])[0]?.id;if(target)loadStudent(target)}
+function renderStudentList(){const list=$('student-list');if(!list)return;list.replaceChildren();const q=studentFilter.trim().toLowerCase();const rows=(state.students||[]).filter(s=>(s.filename+' '+s.student_id).toLowerCase().includes(q));if(!rows.length){list.append(el('p','没有匹配的学生。','small'));return}for(const s of rows){const b=button('',()=>safe(()=>loadStudent(s.id)),'student-item'+(currentStudent===s.id?' selected':''));b.append(el('div',s.filename));b.append(el('div','学号：'+(s.student_id||'未知'),'small'));const pending=s.candidates.filter(c=>c.state==='needs_review').length;b.append(badge(s.candidates.length+' 段代码'),badge(pending?pending+' 段待复核':'无待复核',pending?'warn':'good'));if(s.report)b.append(badge('判题 '+s.report.score+' 分 · '+s.report.status,s.report.status==='全部通过'?'good':'warn'));list.append(b)}}
+async function loadStudent(id,quiet=false){if(!quiet){$('student-detail').replaceChildren(el('p','正在读取学生信息…','panel'))}const d=await api('/api/ui/student',null,{id});currentStudent=id;studentData=d;if(!d.document.candidates.some(c=>c.id===currentCandidate))currentCandidate=d.document.candidates[0]?.id;renderStudentList();renderStudentDetail()}
+function renderStudentDetail(){const host=$('student-detail');if(!host)return;host.replaceChildren();const d=studentData;if(!d)return;const doc=d.document;const head=el('div',undefined,'panel');head.append(el('h2',doc.filename),el('div','学号：'+(doc.student_id||'未知')+' · 文档ID：'+doc.id,'small'));if(doc.issues?.length)head.append(el('div',doc.issues.join('\n'),'notice warn'));if(d.report?.dir)head.append(el('div','判题报告：'+d.report.dir,'small'));else head.append(el('div','尚未找到这份学生的判题报告；可先运行“批量判题”。','notice'));if(d.report?.result?.length){const table=el('table');const tr=el('tr');for(const h of ['题号','本题得分','状态'])tr.append(el('th',h));table.append(tr);for(const row of d.report.result){if(!String(row['题号']||'').match(/^\d+$/))continue;const r=el('tr');r.append(el('td',row['题号']),el('td',row['本题得分']||row['得分']||''),el('td',row['状态']||''));table.append(r)}head.append(table)}host.append(head);const tabs=el('div',undefined,'tabs');for(const c of doc.candidates){const b=button(`第${c.problem_id??'?'}题 · ${c.state}`,()=>{currentCandidate=c.id;renderStudentDetail()},c.id===currentCandidate?'active':'');tabs.append(b)}host.append(tabs);const c=doc.candidates.find(x=>x.id===currentCandidate);if(!c)return;const split=el('div',undefined,'split');const codePanel=el('div',undefined,'panel');codePanel.append(el('h3','提取源码'));if(c.issues?.length)codePanel.append(el('div',c.issues.join('\n'),'notice warn'));const pre=el('pre',undefined,'code');c.code.replace(/\n$/,'').split('\n').forEach((line,i)=>{const row=el('div',undefined,'code-line');row.append(el('span',String(i+1),'ln'),document.createTextNode(line||' '));pre.append(row)});codePanel.append(pre);if(c.compile){const compileDetails=el('details');compileDetails.append(el('summary',c.compile.status==='ok'?'语法编译通过（未执行）':'查看编译错误'),el('pre',c.compile.log||'无日志','plain'));codePanel.append(compileDetails)}split.append(codePanel);const info=el('div',undefined,'panel');info.append(el('h3','复核与 AI 建议'));info.append(el('p','状态：'+c.state+'；题号：'+(c.problem_id??'?'),'small'));if(c.review)info.append(el('div','复核记录：'+(c.review.note||c.review.action),'notice'));if(c.ai){const ai=c.ai;if(ai.error)info.append(el('div','AI 调用失败：'+ai.error,'notice error'));if(ai.triage){const t=ai.triage;info.append(el('div',`提取分诊：${t.verdict} · 置信度 ${Math.round((t.confidence||0)*100)}% · 建议 ${t.suggested_action}`,'notice'));if(t.evidence?.length)info.append(el('div',t.evidence.join('\n'),'small'));if(t.suggested_range)info.append(el('div',`建议范围：${t.suggested_range.start_block} → ${t.suggested_range.end_block}`,'small'))}if(ai.requirements){for(const [key,value] of Object.entries(ai.requirements.deterministic||{}))info.append(el('div',`${key}：${value.status} ${value.evidence||''}`,'small'));for(const r of ai.requirements.requirements||[])info.append(el('div',`要求${r.index+1}：${r.status} ${(r.ai&&r.ai.evidence)||(r.deterministic&&r.deterministic.evidence)||''}`,'small'))}}else info.append(el('p','尚无 AI 建议。可在“AI 复核”中运行。','small'));split.append(info);host.append(split);const cases=el('div',undefined,'panel');cases.append(el('h3','第 '+(c.problem_id??'?')+' 题判题结果'));const rows=(d.report?.cases||[]).filter(r=>String(r['题号'])===String(c.problem_id));if(!rows.length){cases.append(el('p','没有找到这道题的判题结果。','small'))}else{const table=el('table');const tr=el('tr');for(const h of ['用例','结果','比对档位','退出码'])tr.append(el('th',h));table.append(tr);for(const row of rows){const r=el('tr');r.append(el('td',row['用例']),el('td',row['结果'],row['结果']==='通过'?'status-pass':'status-fail'),el('td',row['比对档位']||''),el('td',row['退出码']||''));table.append(r);if(row['结果']!=='通过'){const detail=el('tr');const cell=el('td');cell.colSpan=4;const det=el('details');det.append(el('summary','查看差异/预期/实际'));det.append(el('div','差异：\n'+(row.diff_text||'无'),'small'),el('pre',row.expected_text||'','plain'),el('pre',row.actual_text||'','plain'));cell.append(det);detail.append(cell);table.append(detail)}}cases.append(table)}host.append(cases)}
+function renderSettings(){const s=state.settings||{};const content=$('view');content.replaceChildren();const panel=el('div',undefined,'panel');panel.append(el('h2','设置'));panel.append(el('p','设置保存在当前工作目录的 ui-settings.json。API 密钥不会显示在页面上；请勿把工作目录分享给他人。','small'));const ai=el('div',undefined,'panel');ai.append(el('h3','AI 模型'));const grid=el('div',undefined,'form-grid');grid.append(field('模式','f-ai-mode',s.ai_mode||'off',{type:'select',options:[['off','关闭 AI'],['cloud','云端 API'],['local','本地模型']]}));grid.append(field('服务地址','f-ai-base-url',s.ai_base_url||'',{hint:'OpenAI 兼容地址，例如 https://api.openai.com/v1 或 http://127.0.0.1:11434/v1'}));grid.append(field('模型名称','f-ai-model',s.ai_model||'',{hint:'例如 gpt-4o-mini、deepseek-chat、qwen2.5-coder:7b'}));grid.append(field('API 密钥','f-api-key','',{type:'password',placeholder:s.api_key_set?'已保存；留空不修改':'输入 API 密钥'}));grid.append(field('超时（秒）','f-ai-timeout',s.ai_timeout||90,{type:'number',min:5}));ai.append(grid);const clearLabel=el('label',' ');const clear=el('input');clear.type='checkbox';clear.id='f-clear-api-key';clearLabel.append(clear,document.createTextNode(' 清除已保存的 API 密钥'));ai.append(clearLabel);const localGrid=el('div',undefined,'form-grid');localGrid.append(pathField('本地模型文件（.gguf）','f-local-model-path',s.local_model_path||'','file','GGUF model (*.gguf)|*.gguf|All files (*.*)|*.*','选择本地模型文件'));localGrid.append(pathField('llama-server 可执行文件','f-local-server-path',s.local_server_path||'','file','Executable (*.exe)|*.exe|All files (*.*)|*.*','选择 llama-server'));localGrid.append(field('本地服务端口','f-local-port',s.local_port||8080,{type:'number',min:1024}));ai.append(localGrid);const bar=el('div',undefined,'toolbar');bar.append(button('保存设置',()=>safe(saveSettings),'primary'),button('测试 AI 连接',()=>safe(testAi)),button('启动本地服务',()=>safe(async()=>{await saveSettings(true);await api('/api/ui/local-ai',{action:'start'});toast('本地模型服务已启动');await loadState();renderSettings()})),button('停止本地服务',()=>safe(async()=>{await api('/api/ui/local-ai',{action:'stop'});toast('已停止本地服务')})));ai.append(bar);ai.append(el('p','本地模式：选择 .gguf 模型和 llama-server.exe 后可一键启动；也可以先用 Ollama/LM Studio 启动服务，再填写上面的服务地址和模型名称。','small'));panel.append(ai);const paths=el('div',undefined,'panel');paths.append(el('h3','路径'));const pg=el('div',undefined,'form-grid');pg.append(pathField('教师模板/任务书','f-teacher',s.teacher||'','file','Word (*.docx;*.doc)|*.docx;*.doc|All files (*.*)|*.*','选择教师模板'));pg.append(pathField('学生报告目录','f-submissions',s.submissions||'','folder','','选择学生报告目录'));pg.append(pathField('工作目录','f-workspace',s.workspace||state.workspace||'','folder','','选择工作目录'));pg.append(pathField('导出目录','f-exported',s.exported||'','folder','','选择导出目录'));pg.append(pathField('判题报告目录','f-reports',s.reports||'','folder','','选择判题报告目录'));pg.append(pathField('测试用例目录','f-tests',s.tests||'','folder','','选择测试用例目录'));pg.append(pathField('判题器','f-judge',s.judge||'','file','Executable (*.exe)|*.exe|All files (*.*)|*.*','选择 judge.exe'));pg.append(field('编译器','f-compiler',s.compiler||'g++'));paths.append(pg);paths.append(el('p','工作台的数据视图始终绑定启动时的工作目录；这里的“工作目录”主要用于任务表单默认值。','small'));const pbar=el('div',undefined,'toolbar');pbar.append(button('保存路径',()=>safe(saveSettings),'primary'));paths.append(pbar);panel.append(paths);content.append(panel)}
+async function saveSettings(silent=false){const payload=collect(['f-ai-mode','f-ai-base-url','f-ai-model','f-api-key','f-ai-timeout','f-local-model-path','f-local-server-path','f-local-port','f-teacher','f-submissions','f-workspace','f-exported','f-reports','f-tests','f-judge','f-compiler']);payload.clear_api_key=$('f-clear-api-key')?.checked||false;const r=await api('/api/ui/settings',payload);state.settings=r.settings;if($('f-api-key')){$('f-api-key').value='';$('f-api-key').placeholder=r.settings.api_key_set?'已保存；留空不修改':'输入 API 密钥'}if(!silent)toast('设置已保存');}
+async function testAi(){await saveSettings(true);await startJob('test-ai',{workspace:state.settings.workspace||state.workspace})}
+function renderActionView(view){const s=state.settings||{};if(view==='import'){formView('导入 Word 报告','选择教师模板、学生报告目录和新的空输出目录。导入到新目录后，请用新目录重启工作台（或在命令行使用 review --workspace 新目录）。',[pathField('教师模板/任务书','f-teacher',s.teacher||'','file','Word (*.docx;*.doc)|*.docx;*.doc|All files (*.*)|*.*','选择教师模板'),pathField('学生报告目录','f-submissions',s.submissions||'','folder','','选择学生报告目录'),pathField('输出工作目录','f-out',s.import_out||'','folder','','选择新的空目录')],'prepare','开始导入')}
+if(view==='check'){formView('语法检查','只调用编译器语法阶段，不运行学生程序。',[pathField('工作目录','f-workspace',s.workspace||state.workspace||'','folder','','选择工作目录'),field('编译器','f-compiler',s.compiler||'g++'),field('并发数','f-jobs',4,{type:'number',min:1})],'check','开始检查')}
+if(view==='audit'){formView('完整性审计','核对原件哈希、逐行源码来源和生成源码是否一致。',[pathField('工作目录','f-workspace',s.workspace||state.workspace||'','folder','','选择工作目录')],'audit','运行审计')}
+if(view==='export'){formView('导出源码','教师配置必须已确认，且文档级异常已处理。请选择新的空目录。',[pathField('工作目录','f-workspace',s.workspace||state.workspace||'','folder','','选择工作目录'),pathField('导出到','f-out',s.export_out||'','folder','','选择新的空目录')],'export','开始导出')}
+if(view==='ai-review'){formView('AI 复核','对候选做提取分诊，并检查常量、注释和格式要求。AI 只给建议。',[pathField('工作目录','f-workspace',s.workspace||state.workspace||'','folder','','选择工作目录'),field('阶段','f-stage','all',{type:'select',options:[['all','分诊 + 要求检查'],['triage','只做提取分诊'],['requirements','只做要求检查']]}),field('范围','f-only','needs_review',{type:'select',options:[['needs_review','只处理待复核'],['all','全部候选']]}),field('最多处理数量（0=不限）','f-max',0,{type:'number',min:0}),field('忽略缓存','f-force',false,{type:'checkbox'})],'ai-review','开始 AI 复核');artifactPanel('ai-review')}
+if(view==='judge-batch'){formView('批量判题','对导出目录逐个学生运行现有判题器，并在“学生与判题”中查看结果。',[pathField('导出目录','f-exported',s.exported||'','folder','','选择导出目录'),pathField('测试用例目录','f-tests',s.tests||'','folder','','选择测试用例目录'),pathField('报告输出目录','f-out',s.reports||'','folder','','选择报告输出目录'),pathField('判题器','f-judge',s.judge||'','file','Executable (*.exe)|*.exe|All files (*.*)|*.*','选择 judge.exe'),field('编译器','f-compiler',s.compiler||'g++'),field('超时（毫秒）','f-timeout',5000,{type:'number',min:100}),field('数字容差（留空=关闭）','f-num-tol','',{type:'number',step:'any'}),field('严格比较','f-strict',false,{type:'checkbox'}),field('只判第 N 题（0=全部）','f-problem',0,{type:'number',min:0}),field('伪终端（回显输入）','f-pty',false,{type:'checkbox'}),field('不编译（复用已有可执行文件）','f-no-compile',false,{type:'checkbox'}),field('等待按键时保持运行','f-keep-waiting',false,{type:'checkbox'}),field('详细输出','f-verbose',false,{type:'checkbox'}),field('不忽略身份首行','f-no-skip-header',false,{type:'checkbox'}),field('关闭 conio 兼容','f-no-win-compat',false,{type:'checkbox'})],'judge-batch','开始批量判题')}
+if(view==='ai-output'){formView('AI 输出判定','只处理“答案错误”的用例，判断是否只是格式或提示语差异。不会修改判题报告或成绩。',[pathField('工作目录','f-workspace',s.workspace||state.workspace||'','folder','','选择工作目录'),pathField('判题报告目录','f-reports',s.reports||'','folder','','选择判题报告目录'),pathField('测试用例目录','f-tests',s.tests||'','folder','','选择测试用例目录'),field('结果类型','f-only','答案错误',{type:'select',options:[['答案错误','答案错误'],['','全部未通过']]}),field('最多处理数量（0=不限）','f-max',0,{type:'number',min:0}),field('忽略缓存','f-force',false,{type:'checkbox'})],'ai-output','开始 AI 输出判定');artifactPanel('ai-output')}}
+function artifactPanel(kind){const panel=el('div',undefined,'panel');const title=el('div',undefined,'section-title');title.append(el('h3',kind==='ai-review'?'最近 AI 复核建议':'最近 AI 输出判定'),button('刷新',()=>safe(()=>loadArtifact(kind))));panel.append(title);const box=el('div');box.id='artifact';panel.append(box);$('view').append(panel);safe(()=>loadArtifact(kind))}
+async function loadArtifact(kind){const box=$('artifact');if(!box)return;const r=await api('/api/ui/artifact',null,{name:kind});box.replaceChildren(el('div','结果文件：'+(r.path||''),'small'));if(!r.rows?.length){box.append(el('p','还没有结果。运行上面的任务后会显示在这里。','small'));return}const columns=kind==='ai-review'?['文件','候选','题号','AI分诊','置信度','建议动作','要求检查','证据']:['学生目录','题号','用例','AI判定','置信度','建议接受','建议','证据'];const table=el('table');const tr=el('tr');for(const c of columns)tr.append(el('th',c));table.append(tr);for(const row of r.rows){const line=el('tr');for(const c of columns)line.append(el('td',row[c]??''));table.append(line)}box.append(table)}
+function showView(view){if(view==='review'){window.open('/review?token='+encodeURIComponent(TOKEN),'_blank');return}currentView=view;setActive(view);$('view').replaceChildren();if(view==='overview')renderOverview();else if(view==='students')renderStudents();else if(view==='settings')renderSettings();else renderActionView(view)}
+document.querySelectorAll('#menu button').forEach(b=>b.onclick=()=>safe(async()=>{if(b.dataset.view==='students'&&currentView==='students'){await loadState();return}showView(b.dataset.view)}));
+$('refresh').onclick=()=>safe(async()=>{await loadState();if(currentView==='students'&&currentStudent)await loadStudent(currentStudent,true);toast('已刷新')});
+$('job-close').onclick=()=>{$('job-drawer').hidden=true};
+setInterval(tick,1500);
+safe(async()=>{await loadState();showView('overview')});
+</script>
+</body>
+</html>

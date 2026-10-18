@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+
+# CMake / C++ build products
+build/
+build-windows/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.exe
+*.dll
+*.lib
+*.obj
+*.o
+*.pdb
+*.ilk
+*.idb
+*.log
+code/build/
+code/res.txt
+code/res_p*.txt
+
+# Generated reports and imported student data (may contain private information)
+report/
+exports/
+artifacts/
+imports/*
+!imports/README.md
+
+# Local UI settings and AI cache (may contain an API key)
+ui-settings.json
+**/ai/cache/
+.env
+
+# Nested Visual Studio scratch project
+TestTry/
+*.slnx
+.vs/
+x64/
