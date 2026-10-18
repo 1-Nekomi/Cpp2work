@@ -50,6 +50,9 @@ def empty_summary() -> dict:
 
 def default_settings(root: Path) -> dict:
     project = Path.cwd()
+    judge = project / "build-windows" / "judge.exe"
+    if not judge.is_file() and (project / "build-windows" / "Debug" / "judge.exe").is_file():
+        judge = project / "build-windows" / "Debug" / "judge.exe"
     return {
         "teacher": "",
         "submissions": "",
@@ -57,7 +60,7 @@ def default_settings(root: Path) -> dict:
         "exported": "",
         "reports": str(project / "report" / "imported"),
         "tests": str(project / "tests"),
-        "judge": str(project / "build-windows" / "judge.exe"),
+        "judge": str(judge),
         "compiler": "g++",
         "ai_mode": "off",
         "ai_base_url": "https://api.openai.com/v1",

@@ -34,7 +34,7 @@ Python 代码不依赖第三方库；`pyproject.toml` 只用于打包和 console
 start-workbench.cmd
 ```
 
-它优先打开 `imports\validation-final`；该目录没有批次时，自动在项目内查找最新的已有批次；都没有则打开空工作台，先在“导入”菜单导入即可。导入完成后工作台会自动切换到新目录；也可以在“概览”点击“切换工作目录…”载入任意已有批次。也可以手动启动：
+启动时会先增量编译 `build-windows\judge.exe`；编译失败只提示，不影响导入和复核。它优先打开 `imports\validation-final`；该目录没有批次时，自动在项目内查找最新的已有批次；都没有则打开空工作台，先在“导入”菜单导入即可。导入完成后工作台会自动切换到新目录；也可以在“概览”点击“切换工作目录…”载入任意已有批次。也可以手动启动：
 
 ```powershell
 .\import.ps1 review --workspace imports\validation-final --open
