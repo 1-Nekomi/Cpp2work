@@ -258,6 +258,18 @@ class JobManager:
             return copy.deepcopy(self.jobs.get(self.current, {}))
 
 
+def has_student_code(path: Path) -> bool:
+    return path.is_dir() and any(p.is_dir() and (p / "code").is_dir() for p in path.iterdir())
+
+
+def latest_export(workspace: Path) -> Path | None:
+    base = workspace / "exports"
+    if not base.is_dir():
+        return None
+    candidates = [p for p in base.iterdir() if has_student_code(p)]
+    return max(candidates, key=lambda p: p.stat().st_mtime) if candidates else None
+
+
 def dispatch(root: Path, action: str, params: dict, progress):
     workspace = Path(params.get("workspace") or root).resolve()
     if action == "prepare":
@@ -276,6 +288,14 @@ def dispatch(root: Path, action: str, params: dict, progress):
         return run_review(workspace, provider, stages, params.get("only", "needs_review"),
                           int(params.get("max", 0)), bool(params.get("force")), progress=progress)
     if action == "judge-batch":
+        exported = Path(params["exported"]).resolve()
+        if not has_student_code(exported):
+            fallback = latest_export(workspace)
+            if fallback is None:
+                raise ValueError("导出目录中没有学生 code 子目录：" + str(exported) +
+                                 "。请先导出，或选择包含 <学号>-<文档ID>/code 的目录")
+            exported = fallback
+            progress(f"所选导出目录没有学生源码，已自动使用最新导出：{exported}")
         num_tol = params.get("num_tol")
         extra = []
         try:
@@ -289,11 +309,12 @@ def dispatch(root: Path, action: str, params: dict, progress):
                           ("no_skip_header", "--no-skip-header"), ("no_win_compat", "--no-win-compat")]:
             if params.get(key):
                 extra.append(flag)
-        return run_batch(Path(params["exported"]), Path(params.get("tests") or workspace.parent / "tests"),
+        return run_batch(exported, Path(params.get("tests") or workspace.parent / "tests"),
                          Path(params["out"]), params.get("judge", "build-windows/judge.exe"),
                          params.get("compiler", "g++"), int(params.get("timeout", 5000)),
                          float(num_tol) if num_tol not in (None, "") else None,
-                         bool(params.get("strict")), extra_args=extra, progress=progress)
+                         bool(params.get("strict")), extra_args=extra,
+                         force=bool(params.get("force")), progress=progress)
     if action == "ai-output":
         provider = provider_from_settings(root)
         return run_output_review(workspace, Path(params["reports"]), Path(params.get("tests") or workspace.parent / "tests"),

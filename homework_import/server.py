@@ -166,6 +166,7 @@ def make_server(root: Path, port=0):
                         from datetime import datetime
                         folder = root / "exports" / (datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3))
                         result = {**export_sources(root, folder), "path": str(folder)}
+                        save_settings(root, {"exported": str(folder)})
                     else:
                         return self.respond({"error": "不存在的操作"}, status=404)
                 return self.respond(result)

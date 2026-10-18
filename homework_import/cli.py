@@ -55,6 +55,7 @@ def build_parser():
     p.add_argument("--timeout", type=int, default=5000)
     p.add_argument("--num-tol", type=float)
     p.add_argument("--strict", action="store_true")
+    p.add_argument("--force", action="store_true", help="重新判已完成的学生，不使用已有报告")
     p.add_argument("--problem", type=int, default=0, help="只判第 N 题（0=全部）")
     p.add_argument("--pty", action="store_true")
     p.add_argument("--no-compile", action="store_true")
@@ -94,7 +95,8 @@ def main(argv=None):
                 if getattr(args, key):
                     extra.append(flag)
             result = run_batch(args.exported, args.tests, args.out, args.judge,
-                               args.compiler, args.timeout, args.num_tol, args.strict, extra_args=extra)
+                               args.compiler, args.timeout, args.num_tol, args.strict, extra_args=extra,
+                               force=args.force)
         elif args.command == "ai-output":
             root = args.workspace.resolve()
             provider = provider_from_env(root / "ai" / "cache", args.base_url, args.model)

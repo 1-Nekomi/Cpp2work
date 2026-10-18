@@ -1,4 +1,4 @@
-# C++ 作业自动判题器 0.1
+# C++ 作业自动判题器 0.1.1
 
 面向 C++ 实验报告的批量判题工具：从 Word 报告提取学生源码，保留原文来源，交给教师复核，再导出给现有 C++ 判题器执行测试。
 
@@ -198,7 +198,7 @@ API 密钥保存在当前工作目录的 `ui-settings.json`，页面只显示“
   --out report\imported-2026-10-18
 ```
 
-每个学生生成独立判题报告和 `run.log`，汇总写入 `class-summary.csv` 和 `batch-results.json`。支持 `--strict`、`--num-tol 0.01`、`--timeout 5000`、`--compiler g++`，以及 `--problem N`、`--pty`、`--no-compile`、`--keep-waiting`、`--verbose`、`--no-skip-header`、`--no-win-compat`。
+每个学生生成独立判题报告和 `run.log`，汇总写入 `class-summary.csv` 和 `batch-results.json`。已完成的学生默认跳过，加 `--force` 可重新判；工作台在所选导出目录没有学生代码时，会自动改用工作目录下最新的 `exports/*`，命令行则直接报错。支持 `--strict`、`--num-tol 0.01`、`--timeout 5000`、`--compiler g++`，以及 `--problem N`、`--pty`、`--no-compile`、`--keep-waiting`、`--verbose`、`--no-skip-header`、`--no-win-compat`。
 
 ### AI 复核和输出判定
 
@@ -278,7 +278,7 @@ tests/p1/case2.exp
 python -m unittest discover -s tests_import -q
 ```
 
-当前 46 项测试全部通过，覆盖 DOCX 解析、来源映射、复核门槛、导出限制、配置/原件变化、AI 结构化输出和缓存、工作台页面/状态/任务接口，以及原复核页面。
+当前 49 项测试全部通过，覆盖 DOCX 解析、来源映射、复核门槛、导出限制、配置/原件变化、AI 结构化输出和缓存、工作台页面/状态/任务接口，以及原复核页面。
 
 可选安装为 Python 包：
 
@@ -289,4 +289,4 @@ cpp-homework-import --version
 
 ## 版本
 
-当前版本 **0.1**。变更记录见 [`CHANGELOG.md`](CHANGELOG.md)，项目进度和验证数据见 [`改造工作汇总.md`](改造工作汇总.md)。
+当前版本 **0.1.1**。变更记录见 [`CHANGELOG.md`](CHANGELOG.md)，项目进度和验证数据见 [`改造工作汇总.md`](改造工作汇总.md)。

@@ -29,9 +29,35 @@ def _decode(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+def _student_summary(student: Path, target: Path, exit_code):
+    result_rows = _read_csv(target / "result.csv")
+    case_rows = _read_csv(target / "cases.csv")
+    score = 0.0
+    student_id = student_name = ""
+    problem_count = 0
+    for row in result_rows:
+        if not str(row.get("题号", "")).isdigit():
+            continue
+        problem_count += 1
+        student_id = student_id or row.get("学号", "")
+        student_name = student_name or row.get("姓名", "")
+        try:
+            score += float(row.get("本题得分", row.get("得分", "0")) or 0)
+        except ValueError:
+            pass
+    passed = sum(1 for row in case_rows if row.get("结果") == "通过")
+    has_report = (target / "summary.md").is_file()
+    status = ("无报告" if not has_report else
+              "全部通过" if case_rows and passed == len(case_rows) else "存在未通过")
+    return {"student_dir": student.name, "student_id": student_id, "student_name": student_name,
+            "problems": problem_count, "cases": len(case_rows), "passed": passed,
+            "score": round(score, 2), "exit_code": exit_code,
+            "report": str(target), "status": status}
+
+
 def run_batch(exported: Path, tests: Path, out: Path, judge: str,
               compiler="g++", timeout_ms=5000, num_tol=None, strict=False,
-              judge_timeout=900, extra_args=None, progress=print) -> dict:
+              judge_timeout=900, extra_args=None, force=False, progress=print) -> dict:
     exported = exported.resolve()
     tests = tests.resolve()
     out = out.resolve()
@@ -54,10 +80,21 @@ def run_batch(exported: Path, tests: Path, out: Path, judge: str,
     root = tests.parent
     students = sorted([p for p in exported.iterdir() if p.is_dir() and (p / "code").is_dir()],
                       key=lambda p: p.name.casefold())
+    if not students:
+        raise ValueError("导出目录中没有学生 code 子目录：" + str(exported) +
+                         "。请先导出，或选择包含 <学号>-<文档ID>/code 的目录")
     results = []
+    skipped = 0
     for i, student in enumerate(students, 1):
         target = out / student.name
         target.mkdir(parents=True, exist_ok=True)
+        if not force and (target / "summary.md").is_file() and (target / "result.csv").is_file():
+            summary = _student_summary(student, target, None)
+            summary["skipped"] = True
+            results.append(summary)
+            skipped += 1
+            progress(f"跳过已完成 {i}/{len(students)} {student.name}：{summary['passed']}/{summary['cases']} 用例，{summary['score']:.1f} 分", flush=True)
+            continue
         command = [str(judge_path), "--root", str(root), "--code", str(student / "code"),
                    "--tests", str(tests), "--out", str(target), "--compiler", compiler,
                    "--timeout", str(timeout_ms)]
@@ -74,33 +111,12 @@ def run_batch(exported: Path, tests: Path, out: Path, judge: str,
             exit_code = None
             log = "判题超时（" + str(judge_timeout) + "秒）\n" + _decode(exc.stdout or b"") + _decode(exc.stderr or b"")
         (target / "run.log").write_text(log, encoding="utf-8")
-        result_rows = _read_csv(target / "result.csv")
-        case_rows = _read_csv(target / "cases.csv")
-        score = 0.0
-        student_id = student_name = ""
-        problem_count = 0
-        for row in result_rows:
-            if not str(row.get("题号", "")).isdigit():
-                continue
-            problem_count += 1
-            student_id = student_id or row.get("学号", "")
-            student_name = student_name or row.get("姓名", "")
-            try:
-                score += float(row.get("本题得分", row.get("得分", "0")) or 0)
-            except ValueError:
-                pass
-        passed = sum(1 for row in case_rows if row.get("结果") == "通过")
-        has_report = (target / "summary.md").is_file()
-        status = ("无报告" if not has_report else
-                  "全部通过" if case_rows and passed == len(case_rows) else "存在未通过")
-        results.append({"student_dir": student.name, "student_id": student_id, "student_name": student_name,
-                        "problems": problem_count, "cases": len(case_rows), "passed": passed,
-                        "score": round(score, 2), "exit_code": exit_code,
-                        "report": str(target), "status": status})
-        progress(f"判题 {i}/{len(students)} {student.name}：{passed}/{len(case_rows)} 用例，{score:.1f} 分", flush=True)
+        summary = _student_summary(student, target, exit_code)
+        results.append(summary)
+        progress(f"判题 {i}/{len(students)} {student.name}：{summary['passed']}/{summary['cases']} 用例，{summary['score']:.1f} 分", flush=True)
     report = {"created_at": _now(), "exported": str(exported), "tests": str(tests),
               "judge": str(judge_path), "strict": strict, "num_tol": num_tol,
-              "students": results}
+              "skipped": skipped, "students": results}
     (out / "batch-results.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     with (out / "class-summary.csv").open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f)
@@ -111,4 +127,4 @@ def run_batch(exported: Path, tests: Path, out: Path, judge: str,
     return {"students": len(results), "cases": sum(r["cases"] for r in results),
             "passed": sum(r["passed"] for r in results),
             "failed_students": sum(1 for r in results if r["passed"] != r["cases"]),
-            "output": str(out)}
+            "skipped": skipped, "output": str(out)}
