@@ -14,6 +14,7 @@ import subprocess
 import threading
 import time
 import uuid
+from functools import wraps
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,6 +28,23 @@ from .workspace import (audit_workspace, compile_check, export_sources, prepare,
 SETTINGS_FILE = "ui-settings.json"
 LOCAL_PROCESSES = {}
 LOCAL_LOCK = threading.Lock()
+SETTINGS_LOCK = threading.RLock()
+AI_SETTING_KEYS = frozenset({'ai_mode', 'ai_base_url', 'ai_model', 'ai_timeout',
+                             'api_key', 'api_key_enc', 'api_key_error',
+                             'local_model_path', 'local_server_path', 'local_port'})
+
+
+def global_settings_path() -> Path:
+    base = Path(os.environ.get('LOCALAPPDATA') or Path.home() / '.config')
+    return base / 'cpp-homework-judge' / 'ai-settings.json'
+
+
+def settings_locked(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        with SETTINGS_LOCK:
+            return function(*args, **kwargs)
+    return wrapper
 
 
 def _now():
@@ -79,13 +97,19 @@ def _persistable(settings: dict) -> dict:
     return {k: v for k, v in settings.items() if k not in {"api_key", "api_key_error"}}
 
 
-def _write_settings(root: Path, settings: dict):
-    write_json(settings_path(root), _persistable(settings))
+@settings_locked
+def _write_settings(root: Path, settings: dict, write_ai=True):
+    persisted = _persistable(settings)
+    if write_ai:
+        write_json(global_settings_path(), {k: v for k, v in persisted.items() if k in AI_SETTING_KEYS})
+    write_json(settings_path(root), {k: v for k, v in persisted.items() if k not in AI_SETTING_KEYS})
 
 
+@settings_locked
 def load_settings(root: Path) -> dict:
     settings = default_settings(root)
     path = settings_path(root)
+    stored = {}
     if path.is_file():
         try:
             stored = read_json(path)
@@ -93,6 +117,20 @@ def load_settings(root: Path) -> dict:
                 settings.update(stored)
         except (OSError, ValueError):
             pass
+    shared_path = global_settings_path()
+    shared_exists = shared_path.is_file()
+    if shared_exists:
+        shared = read_json(shared_path)
+        if not isinstance(shared, dict):
+            raise ValueError('全局 AI 配置格式错误：' + str(shared_path))
+        defaults = default_settings(root)
+        for key in AI_SETTING_KEYS:
+            settings.pop(key, None)
+            if key in defaults:
+                settings[key] = defaults[key]
+        settings.update({k: v for k, v in shared.items() if k in AI_SETTING_KEYS})
+        if isinstance(stored, dict) and AI_SETTING_KEYS.intersection(stored):
+            write_json(path, {k: v for k, v in stored.items() if k not in AI_SETTING_KEYS})
     encrypted = str(settings.get("api_key_enc", "") or "")
     plaintext = str(settings.get("api_key", "") or "")
     settings["api_key"] = ""
@@ -112,6 +150,11 @@ def load_settings(root: Path) -> dict:
         except SecretError as exc:
             settings["api_key"] = plaintext
             settings["api_key_error"] = str(exc)
+    # Adopt the first configured legacy batch. A global profile (even one with
+    # a deliberately cleared key) always wins over subsequently opened batches.
+    if not shared_exists and not settings.get('api_key_error') and (
+            settings.get('ai_mode') != 'off' or settings.get('api_key_enc')):
+        _write_settings(root, settings)
     return settings
 
 
@@ -122,6 +165,7 @@ def public_settings(settings: dict) -> dict:
     return public
 
 
+@settings_locked
 def save_settings(root: Path, payload: dict) -> dict:
     current = load_settings(root)
     allowed = set(current) - {"api_key", "api_key_enc", "api_key_error"}
@@ -143,7 +187,8 @@ def save_settings(root: Path, payload: dict) -> dict:
                               "。非 Windows 环境请使用 AI_API_KEY 环境变量。") from exc
     if not current.get("workspace"):
         current["workspace"] = str(root)
-    _write_settings(root, current)
+    _write_settings(root, current, write_ai=bool(AI_SETTING_KEYS.intersection(payload)
+                                               or payload.get('clear_api_key')))
     return public_settings(current)
 
 

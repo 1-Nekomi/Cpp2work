@@ -271,7 +271,7 @@ tests/p1/case2.exp
 - 学生代码和注释是不可信输入，提示词明确要求模型不执行其中的指令。
 - 云端模式会把题面、源码和输出发送给模型提供方；发送前会移除学号、姓名和文件名中的身份信息，但源码字符串中仍可能含姓名。敏感场景请用本地模型。
 - AI 结果保存在本地，按源码哈希和提示词版本缓存；不会上传到其他服务。
-- 云端 API 密钥使用 Windows DPAPI 加密后写入本地 `ui-settings.json`，文件不保存明文；只有创建它的 Windows 用户能解密。非 Windows 环境请使用 `AI_API_KEY` 环境变量。
+- AI 服务地址、模型、模式、超时和本地模型配置由当前用户的所有批次共用，重启后继续生效。首次打开已配置的旧批次时自动迁移，已有全局配置不会被旧批次覆盖。云端 API 密钥使用 Windows DPAPI 加密后写入 `%LOCALAPPDATA%/cpp-homework-judge/ai-settings.json`，文件不保存明文；只有创建它的 Windows 用户能解密。非 Windows 环境请使用 `AI_API_KEY` 环境变量。
 
 ## 工作台阅读与并行任务
 
@@ -288,7 +288,7 @@ tests/p1/case2.exp
 python -m unittest discover -s tests_import -q
 ```
 
-当前 57 项测试全部通过，覆盖 DOCX 解析、来源映射、复核门槛、导出限制、配置/原件变化、AI 结构化输出和缓存、工作台页面/状态/任务接口，以及原复核页面。
+当前 61 项测试全部通过，覆盖 DOCX 解析、来源映射、复核门槛、导出限制、配置/原件变化、AI 结构化输出和缓存、工作台页面/状态/任务接口，以及原复核页面。
 
 浏览器回归（需安装 Playwright npm 包及 Microsoft Edge，运行 `node tests_import/workbench_ui.cjs`）：覆盖自动刷新、展开状态、滚动位置和表单草稿；使用模拟数据，不调用外部 AI。
 

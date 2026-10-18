@@ -1,3 +1,4 @@
+from unittest.mock import patch
 """Behavioral regression tests for loss of code, provenance and review gates."""
 import copy
 import json
@@ -47,6 +48,10 @@ class ImportTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        self.shared_settings = self.root / 'user-config' / 'ai-settings.json'
+        self.settings_patch = patch('homework_import.workbench.global_settings_path', return_value=self.shared_settings)
+        self.settings_patch.start()
+        self.addCleanup(self.settings_patch.stop)
 
     def tearDown(self):
         self.tmp.cleanup()

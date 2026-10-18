@@ -1,3 +1,4 @@
+from unittest.mock import patch
 import csv
 import json
 import os
@@ -94,6 +95,10 @@ class AITests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        self.shared_settings = self.root / 'user-config' / 'ai-settings.json'
+        self.settings_patch = patch('homework_import.workbench.global_settings_path', return_value=self.shared_settings)
+        self.settings_patch.start()
+        self.addCleanup(self.settings_patch.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -169,7 +174,7 @@ class AITests(unittest.TestCase):
         root = self.root / "workspace"
         root.mkdir()
         save_settings(root, {"api_key": "secret-value-123"})
-        stored = settings_path(root).read_text(encoding="utf-8")
+        stored = self.shared_settings.read_text(encoding="utf-8")
         self.assertNotIn("secret-value-123", stored)
         payload = json.loads(stored)
         self.assertNotIn("api_key", payload)
@@ -187,11 +192,53 @@ class AITests(unittest.TestCase):
         write_json(settings_path(root), {"api_key": "legacy-secret"})
         settings = load_settings(root)
         self.assertEqual(settings["api_key"], "legacy-secret")
-        stored = settings_path(root).read_text(encoding="utf-8")
+        stored = self.shared_settings.read_text(encoding="utf-8")
         self.assertNotIn("legacy-secret", stored)
         payload = json.loads(stored)
         self.assertNotIn("api_key", payload)
         self.assertTrue(payload["api_key_enc"].startswith("dpapi:"))
+
+    def test_ai_settings_follow_batch_switch_and_reload(self):
+        first, second = self.root / 'first', self.root / 'second'
+        save_settings(first, {'ai_mode': 'cloud', 'ai_base_url': 'https://example.test/v1',
+                              'ai_model': 'my-model', 'ai_timeout': 123, 'tests': 'first-tests'})
+        save_settings(second, {'tests': 'second-tests'})
+        self.assertEqual(load_settings(second)['ai_model'], 'my-model')
+        self.assertEqual(load_settings(second)['ai_timeout'], 123)
+        self.assertEqual(load_settings(first)['tests'], 'first-tests')
+        self.assertEqual(load_settings(second)['tests'], 'second-tests')
+        self.assertNotIn('ai_model', read_json(settings_path(first)))
+        self.assertEqual(read_json(self.shared_settings)['ai_base_url'], 'https://example.test/v1')
+
+    def test_legacy_batch_migrates_once_without_overriding_global(self):
+        first, second = self.root / 'first', self.root / 'second'
+        write_json(settings_path(first), {'ai_mode': 'local', 'ai_model': 'original', 'local_port': 9000})
+        self.assertEqual(load_settings(first)['ai_model'], 'original')
+        write_json(settings_path(second), {'ai_mode': 'cloud', 'ai_model': 'outdated'})
+        self.assertEqual(load_settings(second)['ai_model'], 'original')
+        self.assertEqual(load_settings(second)['local_port'], 9000)
+        self.assertNotIn('ai_model', read_json(settings_path(second)))
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows DPAPI test')
+    def test_shared_key_roundtrip_clear_and_no_legacy_resurrection(self):
+        first, second = self.root / 'first', self.root / 'second'
+        save_settings(first, {'api_key': 'shared-secret', 'ai_mode': 'cloud'})
+        self.assertEqual(load_settings(second)['api_key'], 'shared-secret')
+        legacy = read_json(self.shared_settings)
+        save_settings(second, {'api_key': '', 'ai_model': 'updated'})
+        self.assertEqual(load_settings(first)['api_key'], 'shared-secret')
+        save_settings(second, {'clear_api_key': True})
+        write_json(settings_path(first), legacy)
+        self.assertEqual(load_settings(first)['api_key'], '')
+        self.assertNotIn('shared-secret', self.shared_settings.read_text())
+
+    def test_path_only_save_does_not_create_global_ai_profile(self):
+        save_settings(self.root / 'empty', {'tests': 'tests'})
+        self.assertFalse(self.shared_settings.exists())
+        legacy = self.root / 'configured'
+        write_json(settings_path(legacy), {'ai_mode': 'local', 'ai_model': 'legacy-model'})
+        self.assertEqual(load_settings(legacy)['ai_model'], 'legacy-model')
+        self.assertTrue(self.shared_settings.exists())
 
     def test_provider_cache_reuses_response(self):
         cache = self.root / "cache"
