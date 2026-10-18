@@ -12,15 +12,26 @@ const assert=require('node:assert/strict');
  await page.route('http://workbench.test/**',async route=>{
   const url=new URL(route.request().url());let data;
   if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync('homework_import/workbench.html','utf8')});
+  if(url.pathname==='/asset'){
+   assert.equal(url.searchParams.get('document'),'teacher');
+   assert.equal(url.searchParams.get('name'),'sample.png');
+   assert.equal(url.searchParams.get('token'),'__TOKEN__');
+   return route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64')});
+  }
   if(url.pathname==='/api/ui/state')data=state;
   else if(url.pathname==='/api/ui/job'){if(route.request().method()==='POST'){submitted=route.request().postDataJSON();data={job:{id:'job1',action:submitted.action,status:'queued',progress:[]}}}else data={jobs:[]}}
   else if(url.pathname==='/api/ui/artifact')data={rows:[{'文件':'示例学生.docx','题意结论':'不符合','逐条要求与证据':'求和：不符合；实际做减法'}]};
-  else if(url.pathname==='/api/ui/student'){detailCalls++;data={document:student,assignment:{problems:[{id:1,statement:'求两个整数之和'}]},report:{dir:'demo',result:[],cases:[{'题号':'1','用例':'case1','结果':'答案错误',diff_text:'difference '+revision,expected_text:'2',actual_text:'3'}],compilation:{'1':{status:'编译失败',log:'error: missing semicolon'}}}}}
+  else if(url.pathname==='/api/ui/student'){detailCalls++;data={document:student,assignment:{problems:[{id:1,statement:'求两个整数之和',images:[{file:'sample.png',preview:true},{file:'sample.emf',preview:false}]}]},report:{dir:'demo',result:[],cases:[{'题号':'1','用例':'case1','结果':'答案错误',diff_text:'difference '+revision,expected_text:'2',actual_text:'3'}],compilation:{'1':{status:'编译失败',log:'error: missing semicolon'}}}}}
   else data={};
   await route.fulfill({json:data});
  });
  await page.goto('http://workbench.test/');
  await page.getByRole('button',{name:'学生与判题',exact:true}).first().click();
+ await page.locator('[data-read-key="problem"] summary').click();
+ await page.locator('.problem-images img').evaluate(img=>img.decode());
+ assert.equal(await page.locator('.problem-images img').evaluate(img=>img.naturalWidth),1);
+ assert.match(await page.locator('.problem-images').innerText(),/该图片格式无法在浏览器预览/);
+ assert.equal(await page.locator('.problem-images a').getAttribute('target'),'_blank');
  await page.locator('[data-read-key="case-1-case1"] summary').click();
  assert.equal(await page.locator('[data-read-key="batch-compile"]').getAttribute('open'),'');
  await page.locator('.code').evaluate(n=>n.scrollTop=600);
@@ -31,6 +42,13 @@ const assert=require('node:assert/strict');
  await page.evaluate(()=>loadState());
  assert.equal(await page.locator('.code').evaluate(n=>n.scrollTop),before);
  assert.equal(await page.locator('[data-read-key="case-1-case1"]').getAttribute('open'),'');
+ assert.equal(await page.locator('[data-read-key="problem"]').getAttribute('open'),'');
+ await page.locator('.problem-images img').evaluate(img=>img.decode());
+ assert.equal(await page.locator('.problem-images img').count(),1);
+ await page.evaluate(()=>{studentData.document.candidates.push({id:'c2',problem_id:2,state:'approved',code:'int main(){}'});currentCandidate='c2';renderStudentDetail()});
+ assert.equal(await page.locator('.problem-images img').count(),0);
+ await page.evaluate(()=>{currentCandidate='c1';renderStudentDetail()});
+ assert.equal(await page.locator('.problem-images img').count(),1);
  await page.locator('#auto-refresh').uncheck();
  const calls=detailCalls;
  await page.evaluate(async()=>{lastStateAt=0;await tick()});
