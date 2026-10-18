@@ -27,6 +27,7 @@ def make_server(root: Path, port=0):
     root.mkdir(parents=True, exist_ok=True)
     token = secrets.token_urlsafe(32)
     lock = threading.Lock()
+    active = {"root": root}
     workbench = (Path(__file__).parent / "workbench.html").read_text(encoding="utf-8")
     review = (Path(__file__).parent / "review.html").read_text(encoding="utf-8")
     jobs = JobManager(root)
@@ -60,6 +61,7 @@ def make_server(root: Path, port=0):
                 return self.respond({"error": "请使用启动命令输出的完整本地链接"}, status=403)
             try:
                 with lock:
+                    root = active["root"]
                     if parsed.path in {"/", "/review"}:
                         page = workbench if parsed.path == "/" else review
                         return self.respond(page.replace("__TOKEN__", token), "text/html; charset=utf-8")
@@ -147,6 +149,7 @@ def make_server(root: Path, port=0):
                 if length <= 0 or length > 5 * 1024 * 1024:
                     raise ValueError("请求大小无效")
                 payload = json.loads(self.rfile.read(length))
+                root = active["root"]
                 # Native dialogs and model startup can take a long time; do not
                 # hold the shared state lock while they run.
                 if parsed.path == "/api/ui/select-path":
@@ -158,6 +161,18 @@ def make_server(root: Path, port=0):
                         return self.respond(stop_local_ai())
                     return self.respond(start_local_ai(root, load_settings(root)))
                 with lock:
+                    if parsed.path == "/api/ui/workspace":
+                        last = jobs.last()
+                        if last.get("status") in {"queued", "running"}:
+                            raise ValueError("已有任务在运行，请等待完成后再切换工作目录")
+                        target = Path(str(payload.get("path", "")).strip()).expanduser().resolve()
+                        if not str(payload.get("path", "")).strip() or not target.is_dir():
+                            raise ValueError("工作目录不存在：" + str(target))
+                        if not has_batch(target):
+                            raise ValueError("该目录没有导入批次（缺少 batch.json）：" + str(target))
+                        active["root"] = target
+                        jobs.root = target
+                        return self.respond({"workspace": str(target)})
                     if parsed.path == "/api/ui/job":
                         action = payload.get("action", "")
                         params = payload.get("params", {})

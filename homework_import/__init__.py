@@ -1,3 +1,3 @@
 """Word homework import, review, AI assistance and batch judging."""
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 VERSION = __version__

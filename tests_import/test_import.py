@@ -284,6 +284,35 @@ class ImportTests(unittest.TestCase):
         finally:
             server.shutdown();server.server_close();thread.join()
 
+    def test_workbench_switches_to_existing_batch_without_restart(self):
+        self.create_workspace()
+        other=self.root/'other-workspace'
+        prepare(self.root/'teacher.docx',self.root/'students',other)
+        root=self.root/'empty-workspace';root.mkdir()
+        server=make_server(root);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            token=server.workbench_url.split('token=',1)[1]
+            base=f'http://127.0.0.1:{server.server_port}'
+            request=urllib.request.Request(base+'/api/ui/workspace?token='+token,
+                data=json.dumps({'path':str(other)}).encode(),
+                headers={'Content-Type':'application/json'})
+            with urllib.request.urlopen(request) as response:
+                switched=json.loads(response.read().decode('utf-8'))
+            self.assertEqual(switched['workspace'],str(other.resolve()))
+            with urllib.request.urlopen(base+'/api/ui/state?token='+token) as response:
+                state=json.loads(response.read().decode('utf-8'))
+            self.assertNotIn('missing',state)
+            self.assertEqual(state['workspace'],str(other.resolve()))
+            self.assertEqual(len(state['students']),1)
+            request=urllib.request.Request(base+'/api/ui/workspace?token='+token,
+                data=json.dumps({'path':str(self.root)}).encode(),
+                headers={'Content-Type':'application/json'})
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(request)
+            self.assertEqual(ctx.exception.code,400)
+        finally:
+            server.shutdown();server.server_close();thread.join()
+
     def test_batch_judge_rejects_empty_export_directory(self):
         exported=self.root/'empty';exported.mkdir()
         tests=self.root/'tests';tests.mkdir()
