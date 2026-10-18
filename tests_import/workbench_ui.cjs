@@ -8,6 +8,7 @@ const assert=require('node:assert/strict');
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  let detailCalls=0,revision=0,submitted=null;
  const student={id:'s1',filename:'示例学生.docx',student_id:'123',candidates:[{id:'c1',problem_id:1,state:'approved',code:Array.from({length:150},(_,i)=>'// source line '+i).join('\n')}]};
+ const testRecords={case1:{name:'case1',problem:'p1',input:'1 2\n',expected:'3\n',description:'求和',expected_extension:'.exp',exists:true,version:'v1'}};
  const state={workspace:'demo',summary:{},settings:{},students:[student],jobs:[]};
  await page.route('http://workbench.test/**',async route=>{
   const url=new URL(route.request().url());let data;
@@ -20,6 +21,16 @@ const assert=require('node:assert/strict');
   }
   if(url.pathname==='/api/ui/state')data=state;
   else if(url.pathname==='/api/ui/job'){if(route.request().method()==='POST'){submitted=route.request().postDataJSON();data={job:{id:'job1',action:submitted.action,status:'queued',progress:[]}}}else data={jobs:[]}}
+  else if(url.pathname==='/api/ui/test-cases'){
+   const name=url.searchParams.get('name');
+   if(route.request().method()==='POST'){
+    const payload=route.request().postDataJSON();
+    if(payload.action==='delete')delete testRecords[payload.name];
+    else testRecords[payload.name]={...payload,exists:true,expected_extension:'.exp',version:'v2'};
+    data={changed:true,data_changed:true,case:testRecords[payload.name]||null};
+   }else if(name)data={directory:'demo-tests',case:testRecords[name]||{name,problem:'p1',input:'',expected:'',description:'',exists:false,missing_input:true,missing_expected:true,expected_extension:'.exp',version:'v0'}};
+   else data={directory:'demo-tests',problems:[{id:'p1',title:'第1题',cases:Object.values(testRecords)}]};
+  }
   else if(url.pathname==='/api/ui/artifact')data={rows:[{'文件':'示例学生.docx','题意结论':'不符合','逐条要求与证据':'求和：不符合；实际做减法'}]};
   else if(url.pathname==='/api/ui/student'){detailCalls++;data={document:student,assignment:{problems:[{id:1,statement:'求两个整数之和',images:[{file:'sample.png',preview:true},{file:'sample.emf',preview:false}]}]},report:{dir:'demo',result:[],cases:[{'题号':'1','用例':'case1','结果':'答案错误',diff_text:'difference '+revision,expected_text:'2',actual_text:'3'}],compilation:{'1':{status:'编译失败',log:'error: missing semicolon'}}}}}
   else data={};
@@ -93,6 +104,28 @@ const assert=require('node:assert/strict');
  await page.evaluate(()=>loadState());
  assert.equal(await page.locator('.student-item').count(),0);
  assert.match(await page.locator('#student-detail').innerText(),/报告已移除/);
+ await page.getByRole('button',{name:'测试用例',exact:true}).click();
+ await page.locator('#tc-expected').fill('4\n');
+ await page.locator('#tc-description').fill('边界条件说明');
+ page.once('dialog',d=>d.dismiss());
+ await page.getByRole('button',{name:'学生与判题',exact:true}).first().click();
+ assert.equal(await page.locator('#tc-expected').inputValue(),'4\n');
+ await page.getByRole('button',{name:'保存用例',exact:true}).click();
+ await page.waitForFunction(()=>!testSaving);
+ assert.equal(testRecords.case1.expected,'4\n');
+ assert.equal(testRecords.case1.description,'边界条件说明');
+ await page.locator('#tc-new-name').fill('case2');
+ await page.getByRole('button',{name:'新增用例',exact:true}).click();
+ await page.waitForFunction(()=>testCase?.name==='case2');
+ await page.locator('#tc-input').fill('0 0\n');
+ await page.locator('#tc-expected').fill('0\n');
+ await page.getByRole('button',{name:'保存用例',exact:true}).click();
+ await page.waitForFunction(()=>!testSaving);
+ assert.equal(testRecords.case2.input,'0 0\n');
+ page.once('dialog',d=>d.accept());
+ await page.getByRole('button',{name:'删除用例',exact:true}).click();
+ await page.waitForFunction(()=>!testSaving);
+ assert.equal(testRecords.case2,undefined);
  assert.deepEqual(errors,[]);
  console.log('UI regression checks passed: refresh, expansion, scroll, pause and form drafts');
  }finally{await browser.close()}

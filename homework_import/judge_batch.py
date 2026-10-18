@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .locking import report_lock
+from .test_cases import tests_revision
 
 import csv
 import json
@@ -85,13 +86,16 @@ def run_batch(exported: Path, tests: Path, out: Path, judge: str,
     if not students:
         raise ValueError("导出目录中没有学生 code 子目录：" + str(exported) +
                          "。请先导出，或选择包含 <学号>-<文档ID>/code 的目录")
+    revision = tests_revision(tests)
     results = []
     skipped = 0
     for i, student in enumerate(students, 1):
         target = out / student.name
         with report_lock(target):
             target.mkdir(parents=True, exist_ok=True)
-            if not force and (target / "summary.md").is_file() and (target / "result.csv").is_file():
+            revision_file = target / '.tests-revision'
+            previous_revision = revision_file.read_text(encoding='utf-8') if revision_file.is_file() else ''
+            if not force and previous_revision == revision and (target / "summary.md").is_file() and (target / "result.csv").is_file():
                 summary = _student_summary(student, target, None)
                 summary["skipped"] = True
                 results.append(summary)
@@ -100,6 +104,7 @@ def run_batch(exported: Path, tests: Path, out: Path, judge: str,
                 continue
             # Prior AI advice belongs to the previous judge run.
             (target / 'ai-output.json').unlink(missing_ok=True)
+            revision_file.write_text('incomplete', encoding='utf-8')
             command = [str(judge_path), "--root", str(root), "--code", str(student / "code"),
                        "--tests", str(tests), "--out", str(target), "--compiler", compiler,
                        "--timeout", str(timeout_ms)]
@@ -116,6 +121,10 @@ def run_batch(exported: Path, tests: Path, out: Path, judge: str,
                 exit_code = None
                 log = "判题超时（" + str(judge_timeout) + "秒）\n" + _decode(exc.stdout or b"") + _decode(exc.stderr or b"")
             (target / "run.log").write_text(log, encoding="utf-8")
+            if tests_revision(tests) != revision:
+                raise ValueError('判题期间测试用例发生变化，请重新运行批量判题')
+            if exit_code in {0, 1}:
+                revision_file.write_text(revision, encoding='utf-8')
             summary = _student_summary(student, target, exit_code)
             results.append(summary)
             progress(f"判题 {i}/{len(students)} {student.name}：{summary['passed']}/{summary['cases']} 用例，{summary['score']:.1f} 分", flush=True)

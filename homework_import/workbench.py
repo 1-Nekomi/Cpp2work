@@ -462,6 +462,10 @@ def dispatch(root: Path, action: str, params: dict, progress):
                          bool(params.get("strict")), extra_args=extra,
                          force=bool(params.get("force")), progress=progress)
     if action == "ai-output":
+        reports = Path(params['reports'])
+        if reports.is_dir() and any(p.is_dir() and (p / 'cases.csv').is_file() and
+                                    report_tests_stale(p, {'tests': params.get('tests')}) for p in reports.iterdir()):
+            raise ValueError('测试用例已修改，请先重新运行批量判题，再进行 AI 输出判定')
         provider = provider_from_settings(root)
         return run_output_review(workspace, Path(params["reports"]), Path(params.get("tests") or workspace.parent / "tests"),
                                  provider, params.get("only", "答案错误"),
@@ -504,6 +508,15 @@ def _limited_text(path, limit=5000):
         return ""
 
 
+def report_tests_stale(report_dir, settings):
+    from .test_cases import tests_revision
+    revision = tests_revision(Path(settings.get('tests') or '.'))
+    if not revision:
+        return False
+    marker = report_dir / '.tests-revision'
+    return not marker.is_file() or marker.read_text(encoding='utf-8') != revision
+
+
 def student_detail(root: Path, settings: dict, document_id: str):
     state = read_json(root / "batch.json")
     document = next((d for d in state["documents"] if d["id"] == document_id), None)
@@ -514,6 +527,7 @@ def student_detail(root: Path, settings: dict, document_id: str):
     report_dir = _report_dir(settings, document)
     if report_dir:
         report["dir"] = str(report_dir)
+        report["tests_stale"] = report_tests_stale(report_dir, settings)
         report["result"] = read_csv(report_dir / "result.csv")
         ai_output = {}
         ai_path = report_dir / "ai-output.json"

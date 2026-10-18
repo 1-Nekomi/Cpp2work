@@ -21,6 +21,7 @@ from .workbench import (JobManager, choose_path, empty_summary, has_batch, load_
                         student_detail, student_overview)
 from .workspace import decide, export_sources, read_json, summary
 from .managed import managed_config, folder_signature, sync_folder, managed_export
+from .test_cases import list_cases, read_case, update_case
 
 
 def make_server(root: Path, port=0, sync_interval=2):
@@ -40,6 +41,12 @@ def make_server(root: Path, port=0, sync_interval=2):
     jobs = JobManager(root)
     stop_watcher = threading.Event()
     sync_status = {'status': 'idle', 'message': ''}
+
+    def tests_root(root):
+        value = str(load_settings(root).get('tests') or '').strip()
+        if not value:
+            raise ValueError('请先在设置中选择测试用例目录')
+        return Path(value).expanduser().resolve()
 
     def completed(job, result):
         if job['action'] == 'prepare' and job['params'].get('managed'):
@@ -124,6 +131,13 @@ def make_server(root: Path, port=0, sync_interval=2):
                                              "settings": public_settings(settings),
                                              "students": student_overview(root, settings),
                                              "jobs": jobs.all(), "job": jobs.last()})
+                    if parsed.path == '/api/ui/test-cases':
+                        tests = tests_root(root)
+                        problem, name = query.get('problem', [''])[0], query.get('name', [''])[0]
+                        if problem and name:
+                            return self.respond({'directory': str(tests), 'case': read_case(tests, problem, name)})
+                        assignment = read_json(root / 'assignment.json') if has_batch(root) else {}
+                        return self.respond(list_cases(tests, assignment))
                     if parsed.path == "/api/ui/student":
                         if not has_batch(root):
                             raise ValueError("当前工作目录还没有导入批次，请先使用“导入”")
@@ -233,6 +247,14 @@ def make_server(root: Path, port=0, sync_interval=2):
                         return self.respond({"job": jobs.get(job_id)})
                     if parsed.path == "/api/ui/settings":
                         return self.respond({"settings": save_settings(root, payload)})
+                    if parsed.path == '/api/ui/test-cases':
+                        if any(j['action'] in {'judge-batch', 'ai-output'} and j['status'] in {'queued', 'running'} for j in jobs.all()):
+                            raise ValueError('批量判题或 AI 输出判定正在使用测试用例，请等待任务结束再保存')
+                        tests = tests_root(root)
+                        if payload.get('directory') != str(tests):
+                            raise ValueError('测试目录已切换，请重新打开测试用例模块')
+                        return self.respond(update_case(tests, payload))
+
                     if parsed.path in {"/api/decision", "/api/export"} and not has_batch(root):
                         raise ValueError("当前工作目录还没有导入批次，请先使用“导入”")
                     if parsed.path == "/api/decision":

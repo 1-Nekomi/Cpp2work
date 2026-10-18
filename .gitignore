@@ -47,3 +47,7 @@ TestTry/
 *.slnx
 .vs/
 x64/
+
+# Test editor backups and revision tracking
+**/.workbench-history/
+**/.workbench-revision
