@@ -2,8 +2,7 @@
 //
 // 设计要点：
 //   1. 一份“学生代码 + 用例”的作业 = 若干道题（默认 5 题），每题若干测试用例；
-//   2. 每题在独立的子进程中判定，判定结论用 assert 断言表达（断言失败只终止该题的子进程，
-//      因此某题不通过不会影响其余题目的判定）；
+//   2. 学生程序在独立进程中执行，超时或崩溃不会影响其余用例；判题结果直接汇总；
 //   3. 比对策略默认“智能容错”（忽略首行学号姓名、忽略 system("pause") 的提示行、
 //      忽略行尾空白与空行、全角/半角标点等价），可用 --strict 切换为逐字符严格比对。
 #pragma once
@@ -27,15 +26,17 @@ struct Options {
     bool skip_header = true;      // 忽略学生程序首行“学号姓名”
     bool use_pty = false;         // 默认只采集程序输出；--pty 用于需要控制台的交互程序
     bool do_compile = true;       // false = 跳过编译，直接使用已有可执行文件
+    bool rebuild = false;        // 强制重建，不复用编译缓存
+    int compile_jobs = 2;         // 仅编译并行，学生程序仍串行运行
     bool win_compat = true;       // 自动为 #include <conio.h> 之类的源码补兼容头
     bool eof_on_idle = true;      // 程序等按键时自动送 EOF / 结束运行（避免误判超时）
     bool list_only = false;       // 只列出题目与用例，不判题
     bool verbose = false;         // 打印每题的编译命令行等细节
-    int only_problem = 0;         // >0 时只判该题（单独调试用，不做多进程隔离）
+    int only_problem = 0;         // >0 时只判该题
 
-    // Windows 下没有 fork，父进程通过“重新启动自身”派生子进程来隔离每题判定。
+    // 兼容旧版内部 worker 参数；正常判题不再启动额外判题进程。
     // 这两个字段仅供内部使用，用户无需关心。
-    bool worker = false;          // true = 当前进程是判题子进程（只判一题并 assert）
+    bool worker = false;          // true = 当前进程是判题子进程（只判一题）
     int worker_problem = 0;       // 子进程负责的题号
 };
 

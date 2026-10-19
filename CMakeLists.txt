@@ -5,17 +5,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# 判题结论依赖 assert 断言，因此任何配置下都不能定义 NDEBUG。
-# Release/RelWithDebInfo 默认会加 -DNDEBUG，这里显式剔除，并用 -UNDEBUG 兜底。
-foreach(_cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
-    if(DEFINED CMAKE_CXX_FLAGS_${_cfg})
-        string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_${_cfg} "${CMAKE_CXX_FLAGS_${_cfg}}")
-    endif()
-endforeach()
-if(NOT MSVC)
-    add_compile_options(-UNDEBUG)
-endif()
-
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "构建类型" FORCE)
 endif()
@@ -25,9 +14,12 @@ add_executable(judge
     src/status.cpp
     src/text.cpp
     src/runner.cpp
+    src/compiler.cpp
     src/report.cpp
 )
 target_include_directories(judge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+find_package(Threads REQUIRED)
+target_link_libraries(judge PRIVATE Threads::Threads)
 if(MSVC)
     target_compile_options(judge PRIVATE /W3 /utf-8)
 else()

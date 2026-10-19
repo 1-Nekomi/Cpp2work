@@ -176,49 +176,6 @@ std::string exe_suffix() {
 #endif
 }
 
-// ------------------------------------------------------------------ 编译
-
-CompileResult compile_problem(const Options& opt, const std::vector<std::string>& srcs,
-                              const std::string& exe) {
-    CompileResult r;
-    std::string cmd = opt.compiler + " -std=c++17 -O0 -Wall -o " + shell_quote(exe);
-
-    // 源码编码：只要有一份不是合法 UTF-8，就按 GBK/GB18030 处理并转成 UTF-8 输出
-    bool any_read = false, all_utf8 = true, has_conio = false;
-    for (const std::string& s : srcs) {
-        std::string data;
-        if (!read_file(s, &data)) continue;
-        any_read = true;
-        if (!is_utf8(data)) all_utf8 = false;
-        if (data.find("conio.h") != std::string::npos) has_conio = true;
-    }
-    if (any_read && !all_utf8) cmd += " -finput-charset=GB18030 -fexec-charset=UTF-8";
-
-#ifndef _WIN32
-    // VS 专属头文件的兼容垫片（Windows/MinGW 自带 conio.h，无需垫片）
-    if (has_conio && opt.win_compat) {
-        std::string compat = opt.root + "/include/compat";
-        if (file_exists(compat + "/conio.h")) cmd += " -I " + shell_quote(compat);
-    }
-#else
-    (void)has_conio;
-#endif
-
-    for (const std::string& s : srcs) cmd += " " + shell_quote(s);
-#ifndef _WIN32
-    cmd += " -lm";
-#endif
-    r.cmd = cmd;
-
-    int rc = run_shell_capture(cmd, &r.log);
-    r.log = to_utf8(r.log);
-    r.ok = (rc == 0) && file_exists(exe);
-    if (!r.ok && r.log.empty()) {
-        r.log = "编译失败（退出码 " + std::to_string(rc) + "），且编译器没有输出任何信息\n";
-    }
-    return r;
-}
-
 // ------------------------------------------------------------------ 运行：Windows（ConPTY 伪控制台；不可用时回退到管道）
 
 #ifdef _WIN32

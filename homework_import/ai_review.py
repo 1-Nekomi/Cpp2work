@@ -24,7 +24,7 @@ SYSTEM = (
 )
 
 TRIAGE_VERSION = "triage-v1"
-REQUIREMENTS_VERSION = "requirements-v2"
+REQUIREMENTS_VERSION = "requirements-v3"
 OUTPUT_VERSION = "output-v1"
 
 TRIAGE_PROMPT = """判断下面这段提取结果的问题更可能来自“提取范围/解析”还是“学生源码本身”。
@@ -49,17 +49,27 @@ confidence 为 0 到 1。suggested_range 只在证据充分时给出，段落ID�
 REQUIREMENTS_PROMPT = """根据教师题目要求检查学生源码。只判断给定要求，不要扩大要求，不要给分数。
 
 判定原则：
-- 符号常量：出现 const 或 #define 才算通过；普通变量或字面量不算。
+- 逐条判断教师明确要求的功能、方法和约束是否已经实现；status 只表示该项要求的实现情况。
+- 已实现要求时判 pass。额外功能、额外提示/输出、额外校验、辅助函数、注释或其他超出要求的内容，只放入 warnings，不得因此判 fail 或 unclear，也不得在 summary 中据此否定整体题意。
+- 只有明确要求缺失、实现错误或明确约束被违反，才能判 fail，并在 evidence 指出对应要求及代码证据。
+- 额外内容确实导致必需结果错误、必需流程无法完成，或违反教师明确禁止事项时，应指出具体未满足的要求，而不能仅以“多余”“超出题意”为理由。
+- 整体题意项同样只检查必需要求是否实现；不得把未要求的代码风格、实现方式或输出简洁性增设为要求。
+- 符号常量：只在教师要求时检查，接受符合要求的 const、constexpr、#define 等形式；若教师指定形式则按明确要求核对。
 - 注释：源码中应有有效注释；只有题目要求写注释时才必须判断。
-- 保留小数位数：需要看到 fixed 与 setprecision(2)/precision(2) 等固定两位小数的写法。
+- 保留小数位数：只核对教师指定的位数，接受 fixed/setprecision、printf 格式等等价实现；不要自行要求两位小数或指定库函数。
 - 其他语义要求：根据代码证据判断 pass/fail/unclear，不能凭输出猜。
 - 证据必须引用源码中的具体片段或说明缺失位置。
 - 无法确认时用 unclear，不要猜测。
 
 输出JSON字段：
-{"requirements":[{"index":0,"status":"pass|fail|unclear","confidence":0.0,"evidence":"..."}],
+{"requirements":[{"index":0,"status":"pass|fail|unclear","confidence":0.0,"evidence":"...",
+ "reason_type":"none|requirement_gap|extra_only|unclear"}],
+ "warnings":["额外内容及源码证据；只警告，不影响题意结论"],
  "summary":"简短说明"}
 index 必须对应输入要求列表的序号，不能新增要求。
+reason_type：none 表示要求已实现且无问题；requirement_gap 表示明确要求缺失/错误/违反；
+extra_only 表示要求已实现，唯一问题是额外内容，此时 status 必须为 pass；unclear 表示证据不足。
+warnings 没有内容时返回空数组。警告独立于 requirements，不参与通过与否的计算。
 """
 
 OUTPUT_PROMPT = """判断学生程序输出与教师预期输出的差异是否可以接受。只根据给定输入、预期、实际和格式政策判断，不要运行代码。
@@ -151,6 +161,7 @@ def validate_requirements(data: dict, count: int) -> dict:
     if not isinstance(items, list):
         items = []
     by_index = {}
+    warnings = _strings(data.get("warnings", [])) if isinstance(data, dict) else []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -163,10 +174,24 @@ def validate_requirements(data: dict, count: int) -> dict:
         status = item.get("status")
         if status not in {"pass", "fail", "unclear"}:
             status = "unclear"
+        evidence = str(item.get("evidence", ""))[:2000]
+        reason = item.get("reason_type")
+        if not isinstance(reason, str):
+            reason = "unclear"
+        if reason == "extra_only":
+            # Explicitly classified extras are advisory, even if the model emits
+            # a contradictory fail/unclear status. Do not infer this from keywords.
+            status = "pass"
+            warning = f"要求{index + 1}的额外内容：{evidence}" if evidence else f"要求{index + 1}存在额外内容"
+            if warning not in warnings:
+                warnings.append(warning)
+            evidence = "该项要求已实现；额外内容仅作警告。"
         by_index[index] = {"status": status, "confidence": _valid_confidence(item.get("confidence")),
-                           "evidence": str(item.get("evidence", ""))[:2000]}
+                           "evidence": evidence, "reason_type": reason if reason in
+                           {"none", "requirement_gap", "extra_only", "unclear"} else "unclear"}
     return {"requirements": [by_index.get(i, {"status": "unclear", "confidence": 0.0,
                                                "evidence": "AI未返回该项"}) for i in range(count)],
+            "warnings": warnings,
             "summary": str(data.get("summary", ""))[:2000] if isinstance(data, dict) else ""}
 
 
@@ -278,7 +303,7 @@ def check_candidate(provider, root: Path, doc: dict, candidate: dict, problem: d
     context = _candidate_context(root, doc, candidate, problem)
     deterministic = deterministic_checks(problem, candidate.get("code", ""))
     requirements = context["problem"]["requirements"]
-    ai_part = {"requirements": [], "summary": "未调用AI：题目没有需要语义判断的要求"}
+    ai_part = {"requirements": [], "warnings": [], "summary": "未调用AI：题目没有需要语义判断的要求"}
     needs_ai = bool(requirements) or bool(re.search(r"注释|常量|保留|格式|要求", context["problem"]["statement"]))
     if needs_ai:
         user = ("请按要求输出JSON。\n\n题目：\n" + json.dumps(context["problem"], ensure_ascii=False, indent=2) +
@@ -297,8 +322,13 @@ def check_candidate(provider, root: Path, doc: dict, candidate: dict, problem: d
                        "deterministic": item["deterministic"], "ai": ai_item})
     statuses = [r['status'] for r in merged]
     verdict = 'fail' if 'fail' in statuses else ('pass' if statuses and all(v == 'pass' for v in statuses) else 'unclear')
+    summary = ai_part['summary']
+    if any((r.get('ai') or {}).get('reason_type') == 'extra_only' for r in merged):
+        summary = {'pass': '各项要求已实现。', 'fail': '存在未满足的明确要求，请查看逐条证据。',
+                   'unclear': '部分要求证据不足，需人工确认。'}[verdict] + '额外内容仅作警告，不影响题意结论。'
     return {"deterministic": deterministic["checks"], "requirements": merged,
-            "verdict": verdict, "ai_summary": ai_part["summary"]}
+            "verdict": verdict, "warnings": ai_part["warnings"],
+            "ai_summary": summary}
 
 
 def run_review(root: Path, provider, stages=("triage", "requirements"), only="needs_review",
@@ -398,8 +428,8 @@ def write_review_summary(root: Path, results: dict):
              f"| 要求检查完成 | {sum(bool(v.get('requirements')) for v in items.values())} |",
              f"| 要求检查通过/失败/不确定 | {counts['pass']} / {counts['fail']} / {counts['unclear']} |",
              f"| 调用失败 | {sum(bool(v.get('error')) for v in items.values())} |", ""]
-    lines += ["| 文件 | 候选 | 题号 | AI分诊 | 置信度 | 建议动作 | 建议范围 | 要求检查 | 证据 |",
-              "|---|---|---|---|---:|---|---|---|---|"]
+    lines += ["| 文件 | 候选 | 题号 | AI分诊 | 置信度 | 建议动作 | 建议范围 | 要求检查 | 证据 | 警告（不影响题意结论） |",
+              "|---|---|---|---|---:|---|---|---|---|---|"]
     for item in sorted(items.values(), key=lambda x: (x.get("filename", ""), x.get("candidate_id", ""))):
         triage = item.get("triage") or {}
         suggested = triage.get("suggested_range")
@@ -409,13 +439,14 @@ def write_review_summary(root: Path, results: dict):
             evidence = ("AI错误：" + item["error"])[:500]
         row = [item.get("filename", ""), item.get("candidate_id", ""), item.get("problem_id", ""),
                triage.get("verdict", ""), triage.get("confidence", ""), triage.get("suggested_action", ""),
-               range_text, _requirement_summary(item), evidence]
+               range_text, _requirement_summary(item), evidence,
+               "；".join((item.get('requirements') or {}).get('warnings', []))]
         lines.append("| " + " | ".join(str(x).replace("|", "\\|") for x in row) + " |")
     (root / "ai-review.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     with (root / "ai-review.csv").open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["文件", "学号", "候选", "题号", "AI分诊", "置信度", "建议动作", "建议范围",
-                         "要求检查", "证据", "错误"])
+                         "要求检查", "证据", "错误", "警告（不影响题意结论）"])
         for item in sorted(items.values(), key=lambda x: (x.get("filename", ""), x.get("candidate_id", ""))):
             triage = item.get("triage") or {}
             suggested = triage.get("suggested_range")
@@ -424,12 +455,13 @@ def write_review_summary(root: Path, results: dict):
                              triage.get("suggested_action"),
                              f"{suggested['start_block']}→{suggested['end_block']}" if suggested else "",
                              _requirement_summary(item), "；".join(triage.get("evidence", [])),
-                             item.get("error") or ""])
+                             item.get("error") or "",
+                             "；".join((item.get('requirements') or {}).get('warnings', []))])
 
     labels = {'pass': '符合', 'fail': '不符合', 'unclear': '无法确定'}
     with (root / 'ai-requirements.csv').open('w', encoding='utf-8-sig', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['文件', '学号', '题号', '候选', '题意结论', '说明', '逐条要求与证据', '错误'])
+        writer.writerow(['文件', '学号', '题号', '候选', '题意结论', '说明', '逐条要求与证据', '错误', '警告（不影响题意结论）'])
         for item in sorted(items.values(), key=lambda x: (x.get('filename', ''), x.get('candidate_id', ''))):
             requirements = item.get('requirements') or {}
             if not requirements and not item.get('error'):
@@ -442,7 +474,8 @@ def write_review_summary(root: Path, results: dict):
             writer.writerow([item.get('filename'), item.get('student_id'), item.get('problem_id'),
                              item.get('candidate_id'), '调用失败' if item.get('error') else
                              labels.get(requirements.get('verdict'), '无法确定'),
-                             requirements.get('ai_summary', ''), '\n'.join(evidence), item.get('error') or ''])
+                             requirements.get('ai_summary', ''), '\n'.join(evidence), item.get('error') or '',
+                             '\n'.join(requirements.get('warnings', []))])
 
 
 def _read_limited(path, limit=8000):

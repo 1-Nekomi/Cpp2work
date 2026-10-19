@@ -8,6 +8,7 @@ const assert=require('node:assert/strict');
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  let detailCalls=0,revision=0,submitted=null;
  const student={id:'s1',filename:'示例学生.docx',student_id:'123',candidates:[{id:'c1',problem_id:1,state:'approved',code:Array.from({length:150},(_,i)=>'// source line '+i).join('\n')}]};
+ student.candidates[0].ai={requirements:{verdict:'pass',requirements:[{index:0,text:'求和',status:'pass',ai:{evidence:'sum=a+b'}}],warnings:['额外输出提示，仅供提醒']}};
  const testRecords={case1:{name:'case1',problem:'p1',input:'1 2\n',expected:'3\n',description:'求和',expected_extension:'.exp',exists:true,version:'v1'}};
  const state={workspace:'demo',summary:{},settings:{},students:[student],jobs:[]};
  await page.route('http://workbench.test/**',async route=>{
@@ -31,13 +32,15 @@ const assert=require('node:assert/strict');
    }else if(name)data={directory:'demo-tests',case:testRecords[name]||{name,problem:'p1',input:'',expected:'',description:'',exists:false,missing_input:true,missing_expected:true,expected_extension:'.exp',version:'v0'}};
    else data={directory:'demo-tests',problems:[{id:'p1',title:'第1题',cases:Object.values(testRecords)}]};
   }
-  else if(url.pathname==='/api/ui/artifact')data={rows:[{'文件':'示例学生.docx','题意结论':'不符合','逐条要求与证据':'求和：不符合；实际做减法'}]};
+  else if(url.pathname==='/api/ui/artifact')data={rows:[{'文件':'示例学生.docx','警告（不影响题意结论）':'额外辅助函数','题意结论':'不符合','逐条要求与证据':'求和：不符合；实际做减法'}]};
   else if(url.pathname==='/api/ui/student'){detailCalls++;data={document:student,assignment:{problems:[{id:1,statement:'求两个整数之和',images:[{file:'sample.png',preview:true},{file:'sample.emf',preview:false}]}]},report:{dir:'demo',result:[],cases:[{'题号':'1','用例':'case1','结果':'答案错误',diff_text:'difference '+revision,expected_text:'2',actual_text:'3'}],compilation:{'1':{status:'编译失败',log:'error: missing semicolon'}}}}}
   else data={};
   await route.fulfill({json:data});
  });
  await page.goto('http://workbench.test/');
  await page.getByRole('button',{name:'学生与判题',exact:true}).first().click();
+ assert.match(await page.locator('#student-detail').innerText(),/题意结论：符合/);
+ assert.match(await page.locator('#student-detail .notice.warn').allTextContents().then(x=>x.join('\n')),/额外输出提示，仅供提醒/);
  await page.locator('[data-read-key="problem"] summary').click();
  await page.locator('.problem-images img').evaluate(img=>img.decode());
  assert.equal(await page.locator('.problem-images img').evaluate(img=>img.naturalWidth),1);
@@ -79,6 +82,8 @@ const assert=require('node:assert/strict');
  assert.equal(submitted.params.document_id,undefined);
  assert.equal(submitted.params.candidate_id,undefined);
  assert.match(await page.locator('#artifact').innerText(),/不符合/);
+ assert.match(await page.locator('#artifact').innerText(),/警告（不影响题意结论）/);
+ assert.match(await page.locator('#artifact').innerText(),/额外辅助函数/);
  await page.getByRole('button',{name:'学生与判题',exact:true}).first().click();
  assert.equal(await page.getByRole('button',{name:'检查当前代码是否符合题意',exact:true}).count(),0);
  state.settings={managed:true,submissions:'students',workspace:'students/work',output:'students/output',reports:'students/output/reports/batch-1',exported:'students/output/sources/batch-a',tests:'tests'};

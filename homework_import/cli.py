@@ -59,6 +59,8 @@ def build_parser():
     p.add_argument("--problem", type=int, default=0, help="只判第 N 题（0=全部）")
     p.add_argument("--pty", action="store_true")
     p.add_argument("--no-compile", action="store_true")
+    p.add_argument("--rebuild", action="store_true", help="忽略编译缓存；同时重新判题")
+    p.add_argument("--compile-jobs", type=int, choices=range(1, 9), default=2)
     p.add_argument("--keep-waiting", action="store_true")
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--no-skip-header", action="store_true")
@@ -86,7 +88,9 @@ def main(argv=None):
             stages = ("triage", "requirements") if args.stage == "all" else (args.stage,)
             result = run_review(root, provider, stages, args.only, args.max, args.force)
         elif args.command == "judge-batch":
-            extra = []
+            extra = ["--compile-jobs", str(args.compile_jobs)]
+            if args.rebuild:
+                extra.append("--rebuild")
             if args.problem > 0:
                 extra += ["--problem", str(args.problem)]
             for key, flag in [("pty", "--pty"), ("no_compile", "--no-compile"),
@@ -96,7 +100,7 @@ def main(argv=None):
                     extra.append(flag)
             result = run_batch(args.exported, args.tests, args.out, args.judge,
                                args.compiler, args.timeout, args.num_tol, args.strict, extra_args=extra,
-                               force=args.force)
+                               force=args.force or args.rebuild)
         elif args.command == "ai-output":
             root = args.workspace.resolve()
             provider = provider_from_env(root / "ai" / "cache", args.base_url, args.model)

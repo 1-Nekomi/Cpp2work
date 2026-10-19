@@ -6,12 +6,11 @@
 //   3. 逐个用例运行学生程序：输入来自 .in（伪终端回显，与 VS 控制台样张一致），
 //      输出同时写入 code/res.txt、code/res_pN.txt 和 report/actual/ 存档；
 //   4. 与预期输出比对（默认智能容错，--strict 可关闭容错）；
-//   5. 每题的最终结论用 assert 断言表达：断言失败 → 该题子进程 abort，父进程继续判其余题；
+//   5. 学生程序在独立进程中运行，判题结果直接保存在内存中，失败继续判其余题；
 //   6. 汇总成绩：终端表格 + report/result.csv + report/cases.csv + report/summary.md。
 #include <algorithm>
-#include <cassert>
+#include <atomic>
 #include <cctype>
-#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -19,12 +18,13 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <set>
+#include <thread>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <io.h>
 #else
-#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -93,38 +93,6 @@ std::string self_exe_path() {
     return std::string();
 #endif
 }
-
-#ifdef _WIN32
-// Windows 命令行参数加引号
-std::string win_quote(const std::string& s) { return shell_quote(s); }
-
-// 以自身为模板重新启动一个子进程（等价于 fork 出的判题子进程），返回退出码；-1 表示启动失败
-int spawn_self(const std::vector<std::string>& args) {
-    const std::string exe = self_exe_path();
-    if (exe.empty()) return -1;
-    const std::wstring wexe = utf8_to_wide(exe);
-    std::wstring cmdline = utf8_to_wide(win_quote(exe));
-    for (const std::string& a : args) cmdline += L" " + utf8_to_wide(win_quote(a));
-    std::vector<wchar_t> buf(cmdline.begin(), cmdline.end());
-    buf.push_back(L'\0');
-
-    STARTUPINFOW si;
-    ZeroMemory(&si, sizeof si);
-    si.cb = sizeof si;
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&pi, sizeof pi);
-    if (!CreateProcessW(wexe.c_str(), buf.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si,
-                        &pi)) {
-        return -1;
-    }
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    DWORD code = 0;
-    GetExitCodeProcess(pi.hProcess, &code);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    return static_cast<int>(code);
-}
-#endif
 
 // 自然序比较：case2 < case10
 bool natural_less(const std::string& a, const std::string& b) {
@@ -213,13 +181,15 @@ void print_help(const char* prog) {
         "  --no-pty           直接重定向输入（默认，输入不回显）\n"
         "  --keep-waiting     程序等按键时一直等着（默认会自动结束这种“输出已完毕却不退出”的运行）\n"
         "  --no-compile       跳过编译，直接使用已有可执行文件\n"
+        "  --rebuild          强制重新编译，忽略目标文件缓存\n"
+        "  --compile-jobs <n> 并行编译数量，1–8（默认 2；用例仍串行执行）\n"
         "  --no-win-compat    不为 #include <conio.h> 自动补兼容头\n"
-        "  --problem <n>      只判第 n 题（答案错了会直接触发 assert 终止，调试用）\n"
+        "  --problem <n>      只判第 n 题\n"
         "  --list             只列出题目与用例\n"
         "  --verbose          打印编译命令行等细节\n"
         "  -h, --help         显示本帮助\n"
         "\n"
-        "退出码: 0 = 全部通过；非 0 = 存在未通过（每题判定失败会触发 assert，见 README）\n",
+        "退出码: 0 = 全部通过；1 = 存在未通过；2 = 参数或用例配置错误\n",
         kVersion, prog);
 }
 
@@ -256,6 +226,16 @@ bool parse_args(int argc, char** argv, Args* out) {
         else if (a == "--no-pty") { o.use_pty = false; }
         else if (a == "--keep-waiting") { o.eof_on_idle = false; }
         else if (a == "--no-compile") { o.do_compile = false; }
+        else if (a == "--rebuild") { o.rebuild = true; }
+        else if (a == "--compile-jobs") {
+            std::string v;
+            if (!need_value(&v)) return false;
+            if (v.size() != 1 || v[0] < '1' || v[0] > '8') {
+                std::fprintf(stderr, "--compile-jobs 必须为 1–8\n");
+                return false;
+            }
+            o.compile_jobs = v[0] - '0';
+        }
         else if (a == "--no-win-compat") { o.win_compat = false; }
         else if (a == "--list") { o.list_only = true; }
         else if (a == "--verbose") { o.verbose = true; }
@@ -314,12 +294,17 @@ std::vector<ProblemSpec> discover_problems(const Options& opt, std::string* erro
     });
 
     int position = 0;
+    std::set<int> problem_indices;
     for (const fs::path& d : dirs) {
         ProblemSpec s;
         s.dir_name = d.filename().string();
         s.dir_path = d.string();
         const int n = number_in_name(s.dir_name);
         s.index = (n > 0) ? n : ++position;
+        if (!problem_indices.insert(s.index).second) {
+            *error = "测试目录包含重复题号: " + std::to_string(s.index);
+            return {};
+        }
 
         // 用例：每个 *.in 配对同名 *.exp / *.out / *.ans
         std::vector<std::string> bases;
@@ -474,7 +459,8 @@ void print_case_line(const ProblemResult& pr, const CaseResult& c) {
 }
 
 ProblemResult judge_problem(const Options& opt, const ProblemSpec& spec,
-                            const std::vector<Profile>& profiles) {
+                            const std::vector<Profile>& profiles,
+                            const CompileResult* prepared = nullptr) {
     ProblemResult pr;
     pr.index = spec.index;
     pr.name = spec.dir_name;
@@ -507,12 +493,13 @@ ProblemResult judge_problem(const Options& opt, const ProblemSpec& spec,
         std::vector<std::string> srcs = {spec.source};
         for (const std::string& s : spec.extra_sources) srcs.push_back(s);
         std::printf("  源码: %s\n", spec.source.c_str());
-        CompileResult cr = compile_problem(opt, srcs, pr.exe);
+        CompileResult cr = prepared ? *prepared : compile_problem(opt, srcs, pr.exe);
         pr.compiled = cr.ok;
         pr.compile_cmd = cr.cmd;
         pr.compile_log = cr.log;
         if (cr.ok) {
             std::printf("  编译: %s\n", color("成功", kGreen).c_str());
+            if (cr.cached_units > 0) std::printf("        编译缓存命中：%d 个源文件\n", cr.cached_units);
             if (opt.verbose) std::printf("        %s\n", cr.cmd.c_str());
         } else {
             std::printf("  编译: %s\n", color("失败", kRed).c_str());
@@ -695,101 +682,12 @@ void write_tsv(const Options& opt, const ProblemResult& pr) {
     write_file(join_path(opt.out_dir, ".internal/p" + std::to_string(pr.index) + ".tsv"), os.str());
 }
 
-std::vector<std::string> split_tsv(const std::string& line) {
-    std::vector<std::string> out;
-    std::string cur;
-    for (char ch : line) {
-        if (ch == '\t') {
-            out.push_back(cur);
-            cur.clear();
-        } else {
-            cur.push_back(ch);
-        }
-    }
-    out.push_back(cur);
-    return out;
-}
-
-ProblemResult load_tsv(const Options& opt, const ProblemSpec& spec) {
-    ProblemResult pr;
-    pr.index = spec.index;
-    pr.name = spec.dir_name;
-    pr.source = spec.source;
-    pr.exe = join_path(join_path(opt.code_dir, "build"),
-                       "p" + std::to_string(spec.index) + exe_suffix());
-
-    std::string data;
-    if (!read_file(join_path(opt.out_dir, ".internal/p" + std::to_string(spec.index) + ".tsv"),
-                   &data)) {
-        return pr; // 子进程没能写出结果（例如被强杀）
-    }
-    std::istringstream is(data);
-    std::string line;
-    while (std::getline(is, line)) {
-        if (line.empty()) continue;
-        std::vector<std::string> f = split_tsv(line);
-        if (f[0] == "compile" && f.size() >= 2) {
-            pr.compiled = (f[1] == "ok");
-            if (f.size() >= 3) pr.compile_log_path = f[2];
-            if (f.size() >= 4) pr.compile_cmd = f[3];
-            if (!pr.compiled && !pr.compile_log_path.empty())
-                read_file(pr.compile_log_path, &pr.compile_log);
-        } else if (f[0] == "student" && f.size() >= 3) {
-            pr.student_id = f[1];
-            pr.student_name = f[2];
-        } else if (f[0] == "case" && f.size() >= 13) {
-            CaseResult c;
-            c.name = f[1];
-            c.status = status_from_token(f[2]);
-            c.profile = f[3];
-            c.profile_text = f[4];
-            c.exit_code = std::atoi(f[5].c_str());
-            c.sig = std::atoi(f[6].c_str());
-            c.signaled = c.sig != 0;
-            c.in_file = f[7];
-            c.exp_file = f[8];
-            c.actual_path = f[9];
-            c.stderr_path = f[10];
-            c.diff_path = f[11];
-            c.note = f[12];
-            if (c.status == Status::Pass) ++pr.passed;
-            // 失败详情从存档文件读回来，供汇总报告使用
-            if (c.status != Status::Pass && !c.diff_path.empty()) {
-                read_file(c.diff_path, &c.diff);
-                if (c.diff.size() > 4000) c.diff = c.diff.substr(0, 4000) + "\n...\n";
-            }
-            pr.cases.push_back(c);
-        }
-    }
-    return pr;
-}
-
-// 在子进程中判定某题，最后用 assert 表达结论。
-// fork 出的子进程与 Windows 下“重新启动自身”的 worker 共用这段逻辑。
-void judge_and_assert(const Options& opt, const ProblemSpec& spec,
-                      const std::vector<Profile>& profiles) {
-    ProblemResult pr = judge_problem(opt, spec, profiles);
-    write_tsv(opt, pr);
-
-    const int total = static_cast<int>(pr.cases.size());
-    const bool all_pass = pr.compiled && total > 0 && pr.passed == total;
-    std::fflush(stdout);
-    if (!all_pass) {
-        std::printf("%s\n",
-                    color("  [断言] 本题存在未通过的测试用例 → assert 断言失败", kRed).c_str());
-        std::fflush(stdout);
-    }
-    // 核心判定：assert 断言。失败时子进程 abort（SIGABRT / 退出码 3），父进程继续判其余题目。
-    assert(all_pass && "本题未通过全部测试用例");
-    std::fflush(stdout);
-}
-
 } // namespace
 
 // ------------------------------------------------------------------ main
 
 int main(int argc, char** argv) {
-    setvbuf(stdout, nullptr, _IOLBF, 0); // 行缓冲：fork/assert abort 时不会丢日志
+    setvbuf(stdout, nullptr, _IOLBF, 0); // 行缓冲：及时显示判题进度
 
 #ifdef _WIN32
     // CRT 把命令行从 UTF-16 转成系统 ANSI 编码，而 libstdc++ 的文件系统按 UTF-8
@@ -866,13 +764,15 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    // ---------- Windows worker 模式：本进程由父进程派生，只判一题并 assert ----------
+    // 兼容旧版内部 worker 调用；正常判题不再派生判题器自身。
     if (opt.worker) {
         const std::vector<Profile> profiles = build_profiles(opt);
         for (const ProblemSpec& spec : specs) {
             if (spec.index == opt.worker_problem) {
-                judge_and_assert(opt, spec, profiles);
-                return 0;
+                const auto result = judge_problem(opt, spec, profiles);
+                write_tsv(opt, result);
+                return result.compiled && !result.cases.empty() &&
+                       result.passed == static_cast<int>(result.cases.size()) ? 0 : 1;
             }
         }
         std::fprintf(stderr, "worker: 未找到第 %d 题\n", opt.worker_problem);
@@ -897,70 +797,48 @@ int main(int argc, char** argv) {
 
     const std::vector<Profile> profiles = build_profiles(opt);
 
-    // ---------- 逐题判定：每题一个子进程，assert 失败只终止该题 ----------
-    std::vector<ProblemResult> results;
-    for (const ProblemSpec& spec : specs) {
-        if (opt.only_problem > 0 && spec.index != opt.only_problem) continue;
-
-        const std::string tsv = join_path(
-            opt.out_dir, ".internal/p" + std::to_string(spec.index) + ".tsv");
-        std::error_code rec;
-        fs::remove(tsv, rec);
-
-#ifdef _WIN32
-        // Windows 没有 fork：把自身重新启动为一个“只判该题并 assert”的子进程，
-        // 效果与 fork 相同——某题断言失败只终止该子进程，父进程继续判其余题目。
-        std::vector<std::string> wargs;
-        for (int i = 1; i < argc; ++i) wargs.push_back(argv[i]);
-        wargs.push_back("--worker");
-        wargs.push_back(std::to_string(spec.index));
-        std::fflush(stdout);
-        const int rc = spawn_self(wargs);
-        if (rc == -1) {
-            std::printf("%s\n", color("  → 第 " + std::to_string(spec.index) +
-                                          " 题判题子进程无法启动（" + self_exe_path() + "）",
-                                      kRed)
-                                     .c_str());
-        } else if (rc != 0) {
-            std::printf("%s\n", color("  → 第 " + std::to_string(spec.index) +
-                                          " 题 assert 断言失败（该题判定为未通过）",
-                                      kRed)
-                                     .c_str());
-        }
-#else
-        std::fflush(stdout); // fork 前清空缓冲，避免子进程重复输出
-        pid_t pid = ::fork();
-        if (pid == 0) {
-            // ---- 子进程：判定该题，最后用 assert 表达结论 ----
-            judge_and_assert(opt, spec, profiles);
-            ::_exit(0);
-        }
-
-        int status = 0;
-        ::waitpid(pid, &status, 0);
-        if (WIFSIGNALED(status)) {
-            const int sig = WTERMSIG(status);
-            if (sig == SIGABRT) {
-                std::printf("%s\n", color("  → 第 " + std::to_string(spec.index) +
-                                              " 题 assert 断言失败（该题判定为未通过）",
-                                          kRed)
-                                         .c_str());
-            } else {
-                std::printf("%s\n", color("  → 第 " + std::to_string(spec.index) +
-                                              " 题判题子进程被信号 " + std::to_string(sig) +
-                                              " 终止",
-                                          kRed)
-                                         .c_str());
+    // Bound compiler concurrency; never run timed student programs concurrently.
+    // Results are indexed by spec and printed in the original deterministic order.
+    std::vector<CompileResult> compiled(specs.size());
+    if (opt.do_compile) {
+        std::printf("编译准备：最多 %d 个并行任务\n", opt.compile_jobs);
+        std::atomic<size_t> next{0};
+        auto compile_next = [&]() {
+            for (;;) {
+                const size_t i = next.fetch_add(1);
+                if (i >= specs.size()) return;
+                const auto& spec = specs[i];
+                if (spec.source.empty() ||
+                    (opt.only_problem > 0 && spec.index != opt.only_problem)) continue;
+                std::vector<std::string> sources{spec.source};
+                sources.insert(sources.end(), spec.extra_sources.begin(), spec.extra_sources.end());
+                try {
+                    compiled[i] = compile_problem(opt, sources, join_path(opt.code_dir,
+                        "build/p" + std::to_string(spec.index) + exe_suffix()));
+                } catch (const std::exception& e) {
+                    compiled[i].log = std::string("编译任务失败: ") + e.what();
+                }
             }
-        } else if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-            std::printf("%s\n", color("  → 第 " + std::to_string(spec.index) +
-                                          " 题判题子进程异常退出（status=" +
-                                          std::to_string(status) + "）",
-                                      kRed)
-                                     .c_str());
+        };
+        std::vector<std::thread> workers;
+        const size_t count = std::min(specs.size(), static_cast<size_t>(opt.compile_jobs));
+        // The calling thread also works; gracefully degrade if threads cannot be started.
+        for (size_t i = 1; i < count; ++i) {
+            try { workers.emplace_back(compile_next); }
+            catch (const std::system_error&) { break; }
         }
-#endif
-        results.push_back(load_tsv(opt, spec));
+        compile_next();
+        for (auto& worker : workers) worker.join();
+    }
+
+    // 学生可执行文件仍在独立进程中执行。调度与汇总无需额外的 worker、
+    // 重复用例扫描和 TSV 往返，更不应把普通答案错误作为判题器崩溃。
+    std::vector<ProblemResult> results;
+    results.reserve(specs.size());
+    for (size_t i = 0; i < specs.size(); ++i) {
+        const auto& spec = specs[i];
+        if (opt.only_problem > 0 && spec.index != opt.only_problem) continue;
+        results.push_back(judge_problem(opt, spec, profiles, opt.do_compile ? &compiled[i] : nullptr));
     }
 
     if (results.empty()) {
@@ -991,10 +869,9 @@ int main(int argc, char** argv) {
     }
     std::fflush(stdout);
 
-    // 最终判定：整份作业是否全部通过（报告已落盘，断言失败不会丢失任何信息）
+    // 正常的失败结果返回 1，批量判题可以将它标记为已完成并复用。
     const bool all_ok = (total_cases > 0 && total_pass == total_cases);
     if (all_ok) return 0;
     std::fprintf(stderr, "整体判定：%d/%d 个用例通过 → 未全部通过\n", total_pass, total_cases);
-    assert(all_ok && "整份作业未通过全部测试用例");
     return 1;
 }

@@ -40,6 +40,8 @@
 
 `src/` 和 `include/` 只负责确定性的编译、运行、输出比对和报告生成。它不知道 Word、AI 或工作台的存在。输入约定是 `code/pN.cpp` 加 `tests/pN/caseM.in/.exp`，输出是 `report/summary.md`、`result.csv`、`cases.csv` 和实际输出存档。
 
+编译流程由 `src/compiler.cpp` 管理：默认最多 2 个编译任务并行，每次预处理并校验目标文件缓存，始终重新链接；学生进程运行由 `src/runner.cpp` 管理，用例仍串行执行。编译失败和答案错误作为结果汇总，不触发判题器断言。详见 [判题性能说明](JUDGE_PERFORMANCE.md)。
+
 C++ 层保持确定性：同样的源码和用例必须得到同样的结论。AI 不进入这一层。
 
 ### 2. Word 导入核心

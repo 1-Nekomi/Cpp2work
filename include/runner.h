@@ -10,6 +10,7 @@ namespace judge {
 
 struct CompileResult {
     bool ok = false;
+    int cached_units = 0;
     std::string cmd;
     std::string log;
 };
